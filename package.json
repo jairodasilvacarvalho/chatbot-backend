@@ -1,11 +1,17 @@
 {
-  "name": "chatbot",
+  "name": "whatsapp-ai-backend",
   "version": "1.0.0",
-  "description": "Agente de WhatsApp com Node.js",
-  "main": "server.js",
+  "private": true,
+  "type": "commonjs",
   "scripts": {
     "start": "node server.js",
-    "dev": "nodemon server.js"
+    "dev": "node --watch server.js"
   },
-  "type": "commonjs"
+  "dependencies": {
+    "cors": "^2.8.5",
+    "dotenv": "^17.2.3",
+    "express": "^5.2.1",
+    "node-fetch": "^3.3.2",
+    "sqlite3": "^5.1.7"
+  }
 }
