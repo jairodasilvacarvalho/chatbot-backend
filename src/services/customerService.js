@@ -1,45 +1,110 @@
-const { run, all } = require("../../config/db");
+// src/services/customerService.js
+const db = require("../../config/db");
 
-async function upsertCustomer({ phone, name }) {
-  if (!phone) throw new Error("phone é obrigatório");
-
-  await run(
-    `
-    INSERT INTO customers (phone, name, last_seen_at)
-    VALUES (?, ?, datetime('now'))
-    ON CONFLICT(phone) DO UPDATE SET
-      name = COALESCE(excluded.name, customers.name),
-      last_seen_at = datetime('now')
-    `,
-    [phone, name || null]
-  );
-
-  return getCustomerByPhone(phone);
-}
-
+/**
+ * Busca customer pelo phone
+ */
 async function getCustomerByPhone(phone) {
-  const rows = await all(
-    `SELECT * FROM customers WHERE phone = ? LIMIT 1`,
+  if (!phone) return null;
+
+  const rows = await db.all(
+    `
+      SELECT *
+      FROM customers
+      WHERE phone = ?
+      LIMIT 1
+    `,
     [phone]
   );
+
   return rows[0] || null;
 }
 
+/**
+ * Cria customer se não existir
+ * Sempre atualiza last_seen_at
+ */
+async function getOrCreateCustomer({ phone, name }) {
+  if (!phone) throw new Error("getOrCreateCustomer: phone is required");
+
+  let customer = await getCustomerByPhone(phone);
+
+  if (!customer) {
+    await db.run(
+      `
+        INSERT INTO customers (phone, name, created_at, last_seen_at)
+        VALUES (?, ?, datetime('now'), datetime('now'))
+      `,
+      [phone, name || null]
+    );
+
+    customer = await getCustomerByPhone(phone);
+    return customer;
+  }
+
+  // Atualiza last_seen_at sempre que há interação
+  await db.run(
+    `
+      UPDATE customers
+      SET last_seen_at = datetime('now')
+      WHERE phone = ?
+    `,
+    [phone]
+  );
+
+  return customer;
+}
+
+/**
+ * Atualiza estado do customer (parcial)
+ */
 async function updateCustomerState(phone, patch = {}) {
-  const keys = Object.keys(patch);
-  if (keys.length === 0) return;
+  if (!phone) throw new Error("updateCustomerState: phone is required");
+  if (!patch || typeof patch !== "object") return;
 
-  const setSql = keys.map((k) => `${k} = ?`).join(", ");
-  const values = keys.map((k) => patch[k]);
+  const fields = [];
+  const values = [];
 
-  await run(
-    `UPDATE customers SET ${setSql} WHERE phone = ?`,
-    [...values, phone]
+  for (const [key, value] of Object.entries(patch)) {
+    fields.push(`${key} = ?`);
+    values.push(value);
+  }
+
+  if (!fields.length) return;
+
+  values.push(phone);
+
+  await db.run(
+    `
+      UPDATE customers
+      SET ${fields.join(", ")}
+      WHERE phone = ?
+    `,
+    values
+  );
+}
+
+/**
+ * Incremento simples (mantido por compatibilidade futura)
+ * ⚠️ Hoje o agent controla o text_streak
+ */
+async function incrementTextStreak(phone) {
+  if (!phone) return;
+
+  await db.run(
+    `
+      UPDATE customers
+      SET text_streak = COALESCE(text_streak, 0) + 1,
+          last_seen_at = datetime('now')
+      WHERE phone = ?
+    `,
+    [phone]
   );
 }
 
 module.exports = {
-  upsertCustomer,
   getCustomerByPhone,
+  getOrCreateCustomer,
   updateCustomerState,
+  incrementTextStreak, // não usado agora, mas mantido
 };
