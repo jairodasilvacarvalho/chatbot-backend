@@ -1,0 +1,2 @@
+ALTER TABLE tenants
+ADD COLUMN allow_tts INTEGER DEFAULT 0;

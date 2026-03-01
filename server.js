@@ -1,110 +1,162 @@
-import path from "path";
-import express from "express";
-
-const audioDir = process.env.TTS_AUDIO_DIR || "storage/audio";
-app.use("/media/audio", express.static(path.resolve(audioDir)));
-
+// server.js — versão estável e limpa
 
 require("dotenv").config();
 
+const path = require("path");
 const express = require("express");
 const cors = require("cors");
 
-// ============================
-// ✅ Boot logs
-// ============================
-console.log(">>> SERVER.JS CARREGADO <<<");
+console.log(">>> SERVER.JS INICIADO <<<");
 console.log("PID:", process.pid);
+console.log("NODE_ENV:", process.env.NODE_ENV || "development");
+console.log("WHATSAPP_MODE:", process.env.WHATSAPP_MODE || "mock");
 
-// ============================
-// 🔌 Inicializa DB (migrações rodam ao importar)
-// ============================
-require("./config/db");
-
-// ============================
-// ⚙️ App / Env
-// ============================
 const app = express();
-
-const PORT = Number(process.env.PORT || 3000);
+const PORT = Number(process.env.PORT || 3001);
 const HOST = process.env.HOST || "127.0.0.1";
 
-// ============================
-// 🧱 Middlewares (sempre primeiro)
-// ============================
+app.set("trust proxy", 1);
 
-/**
- * ✅ CORS
- * - Permite dashboard (3001) e o próprio backend (3000)
- * - Responde preflight automaticamente via app.options
- */
-const allowedOrigins = new Set([
-  "http://localhost:3001",
-  "http://127.0.0.1:3001",
-  "http://localhost:3000",
-  "http://127.0.0.1:3000",
-]);
+// ============================
+// 🔌 DB
+// ============================
+const { attachDbToApp } = require("./config/db");
+attachDbToApp(app);
+
+// ============================
+// 🧱 CORS
+// ============================
+const allowedOrigins = (process.env.CORS_ORIGINS || "")
+  .split(",")
+  .map((s) => s.trim())
+  .filter(Boolean);
 
 app.use(
   cors({
     origin(origin, cb) {
-      // Permite chamadas sem Origin (ex: curl, Postman)
       if (!origin) return cb(null, true);
-      if (allowedOrigins.has(origin)) return cb(null, true);
-      return cb(new Error(`CORS blocked for origin: ${origin}`));
+      if (allowedOrigins.length === 0 || allowedOrigins.includes(origin)) {
+        return cb(null, true);
+      }
+      return cb(new Error("CORS blocked"));
     },
-    credentials: false,
-    allowedHeaders: ["Content-Type", "x-admin-key"],
+    allowedHeaders: ["Content-Type", "Authorization", "x-tenant-id"],
     methods: ["GET", "POST", "PATCH", "PUT", "DELETE", "OPTIONS"],
   })
 );
 
-// ✅ Preflight global (resolve CORS sem “gambi” por rota)
-app.options(/.*/, cors());
+app.use((req, res, next) => {
+  if (req.method === "OPTIONS") return res.sendStatus(204);
+  next();
+});
 
-// ✅ Body parser
-app.use(express.json({ limit: "1mb" }));
-
-// ✅ Log simples (útil pra debug; pode desligar depois)
+// ============================
+// 🧾 LOGS
+// ============================
 app.use((req, res, next) => {
   console.log(`[${new Date().toISOString()}] ${req.method} ${req.originalUrl}`);
   next();
 });
 
 // ============================
-// 🌐 Rotas públicas
+// 🔊 STATIC ÁUDIO
 // ============================
+const audioDir = process.env.TTS_AUDIO_DIR || "storage/audio";
+app.use("/media/audio", express.static(path.resolve(audioDir)));
 
-// Health check
+// ============================
+// 🌐 WEBHOOK REAL (RAW BODY)
+// ============================
+const verifyMetaSignature = require("./middlewares/verifyMetaSignature");
+const webhookHandler = require("./routes/webhook");
+
+app.post(
+  "/webhook",
+  express.raw({ type: "application/json" }),
+  verifyMetaSignature,
+  webhookHandler
+);
+
+// ============================
+// 🧪 JSON
+// ============================
+app.use(express.json({ limit: "1mb" }));
+
+// ============================
+// 🧪 SIMULATOR (usa tenantMiddleware)
+// ============================
+const tenantMiddleware = require("./middlewares/tenant");
+const simulatorRoutes = require("./routes/simulator");
+
+app.use("/simulator", tenantMiddleware, simulatorRoutes);
+
+// ============================
+// 🏠 HEALTH
+// ============================
 app.get("/", (req, res) => {
-  res.status(200).send("Servidor OK + Banco OK");
+  res.status(200).send("Servidor OK");
 });
 
-// Webhook (público)
-const webhookRoutes = require("./routes/webhook");
-app.use("/webhook", webhookRoutes);
-
-// Mock incoming (público) — PASSO 3.1
-// (crie routes/mock.js e descomente quando existir)
-const mockRoutes = require("./routes/mock");
-app.use("/mock", mockRoutes);
+// ============================
+// 🖥️ ADMIN UI (estático)
+// ============================
+app.use("/admin", express.static(path.join(__dirname, "public", "admin")));
 
 // ============================
-// 🔐 Admin protegido
+// 🔐 ADMIN LOGIN (SEM JWT)
 // ============================
-const { adminAuth } = require("./middleware/adminAuth");
-const adminRoutes = require("./routes/admin");
+const adminLoginRoutes = require("./routes/adminLogin");
+app.use("/admin", adminLoginRoutes);
 
-// Log específico do admin (após preflight global)
+// ============================
+// 🔐 ADMIN JWT (PROTEGE TUDO ABAIXO)
+// ============================
+const adminJwt = require("./middlewares/adminJwt");
+
 app.use("/admin", (req, res, next) => {
-  console.log(">>> /admin REQUEST <<<", req.method, req.originalUrl);
-  next();
+  if (req.path === "/login") return next();
+  return adminJwt(req, res, next);
 });
 
-app.use("/admin", adminAuth, adminRoutes);
+// ============================
+// 🔐 ROTAS ADMIN (JWT apenas)
+// ============================
+const adminRoutes = require("./routes/admin");
+const adminTrainingRoutes = require("./routes/adminTraining");
+const adminCustomerResetRoutes = require("./routes/adminCustomerReset");
+const adminProductsTraining = require("./routes/adminProductsTraining");
+const productWizardRoutes = require("./routes/admin/productWizard");
+const adminLogoutRoutes = require("./routes/adminLogout");
+const adminProductsPlaybookRoutes = require("./routes/adminProductsPlaybook");
+
+// ⚠️ IMPORTANTE:
+// Montar o Playbook ANTES do adminRoutes
+// porque adminRoutes pode ter um 404 interno.
+app.use("/admin", adminProductsPlaybookRoutes);
+
+app.use("/admin", adminTrainingRoutes);
+app.use("/admin", adminCustomerResetRoutes);
+app.use("/admin", adminProductsTraining);
+app.use("/admin/product-wizard", productWizardRoutes);
+
+// adminRoutes por último
+app.use("/admin", adminRoutes);
+
+app.use("/admin", adminLogoutRoutes);
+
+console.log("✅ adminProductsPlaybookRoutes mounted at /admin");
 
 // ============================
-// ❌ 404 Handler (sempre no final)
+// ❌ 404
+// ✅ REGISTRE A ROTA DO PLAYBOOK
+app.use("/admin", adminProductsPlaybookRoutes);
+
+app.use("/admin", adminLogoutRoutes);
+
+console.log("✅ adminProductsPlaybookRoutes mounted at /admin");
+
+// ============================
+// ❌ 404
 // ============================
 app.use((req, res) => {
   res.status(404).json({
@@ -116,57 +168,40 @@ app.use((req, res) => {
 });
 
 // ============================
-// 💥 Error Handler global
+// 💥 ERROR HANDLER
 // ============================
 app.use((err, req, res, next) => {
   console.error("UNHANDLED_ERROR:", err);
-
-  // Se for erro de CORS, retorna 403
-  const isCorsError = String(err?.message || "").toLowerCase().includes("cors");
-  const status = isCorsError ? 403 : 500;
-
-  res.status(status).json({
+  const isCors = String(err.message || "").toLowerCase().includes("cors");
+  res.status(isCors ? 403 : 500).json({
     ok: false,
-    error: isCorsError ? "CORS blocked" : "Internal server error",
-    message: err?.message || "Unknown error",
+    error: isCors ? "CORS blocked" : "Internal server error",
   });
 });
 
 // ============================
-// 🚀 Start + graceful shutdown
+// 🚀 START
 // ============================
-  const server = app.listen(PORT, HOST, () => {
-  const base = `http://${HOST}:${PORT}`;
-
-  console.log(`Servidor rodando em ${base}`);
-  console.log("Rotas públicas:");
-  console.log(`- GET   ${base}/`);
-  console.log(`- POST  ${base}/webhook`);
-  console.log(`- GET   ${base}/webhook`);
-  console.log(`- POST  ${base}/mock/incoming`);
-
-  console.log("Admin endpoints (🔒 protegidos):");
-  console.log(`- GET    ${base}/admin/customers`);
-  console.log(`- GET    ${base}/admin/conversations/:phone`);
-  console.log(`- GET    ${base}/admin/stats`);
-  console.log(`- GET    ${base}/admin/kanban`);
-  console.log(`- PATCH  ${base}/admin/customers/:phone/stage`);
-  console.log(`- PATCH  ${base}/admin/kanban/order`);
+const server = app.listen(PORT, HOST, () => {
+  console.log(`Servidor rodando em http://${HOST}:${PORT}`);
 });
 
+// ============================
+// 🛑 SHUTDOWN
+// ============================
 function shutdown(signal) {
-  console.log(`\nRecebido ${signal}. Encerrando servidor...`);
-  server.close(() => {
-    console.log("Servidor encerrado com sucesso.");
-    process.exit(0);
-  });
-
-  // Se travar por algum motivo, força saída
-  setTimeout(() => {
-    console.log("Forçando encerramento (timeout).");
-    process.exit(1);
-  }, 5000).unref();
+  console.log(`Encerrando (${signal})...`);
+  server.close(() => process.exit(0));
+  setTimeout(() => process.exit(1), 5000).unref();
 }
 
 process.on("SIGINT", () => shutdown("SIGINT"));
 process.on("SIGTERM", () => shutdown("SIGTERM"));
+process.on("uncaughtException", (err) => {
+  console.error("UNCAUGHT_EXCEPTION:", err);
+  process.exit(1);
+});
+process.on("unhandledRejection", (reason) => {
+  console.error("UNHANDLED_REJECTION:", reason);
+  process.exit(1);
+});

@@ -1,79 +1,130 @@
+console.log("🔥 TTS NOVO CARREGADO — FAIL SAFE ATIVO 🔥");
+
 // src/services/tts.js
-import fs from "fs";
-import path from "path";
-import crypto from "crypto";
+// ✅ ElevenLabs TTS (FAIL-SAFE TOTAL)
+// - NUNCA lança erro
+// - Se falhar, retorna null
+// - Texto SEMPRE continua funcionando
 
-const ELEVEN_API_KEY = process.env.ELEVENLABS_API_KEY;
-const VOICE_ID = process.env.ELEVENLABS_VOICE_ID;
-const MODEL_ID = process.env.TTS_MODEL_ID || "eleven_multilingual_v2";
+const fs = require("fs");
+const path = require("path");
+const crypto = require("crypto");
 
-const AUDIO_DIR = process.env.TTS_AUDIO_DIR || "storage/audio";
-const PUBLIC_BASE_URL = process.env.PUBLIC_BASE_URL || "http://127.0.0.1:3000";
-
-function ensureDir(p) {
-  fs.mkdirSync(p, { recursive: true });
+/* ======================
+   Utils
+====================== */
+function ensureDir(dir) {
+  try {
+    fs.mkdirSync(dir, { recursive: true });
+  } catch {}
 }
 
-function hashText(text, voiceId) {
-  return crypto.createHash("sha1").update(`${voiceId}::${text}`).digest("hex");
+function baseUrl() {
+  const raw = String(process.env.PUBLIC_BASE_URL || "").trim();
+  return raw ? raw.replace(/\/$/, "") : "http://127.0.0.1:3001";
 }
 
-/**
- * Gera mp3 com ElevenLabs e salva em disco.
- * Retorna metadata pronta para persistir.
- */
-export async function synthesizeToFile(text, opts = {}) {
-  if (!ELEVEN_API_KEY) throw new Error("ELEVENLABS_API_KEY missing");
-  if (!VOICE_ID) throw new Error("ELEVENLABS_VOICE_ID missing");
+function audioDir() {
+  return String(process.env.TTS_AUDIO_DIR || "storage/audio").trim();
+}
 
-  const voiceId = opts.voiceId || VOICE_ID;
-  const modelId = opts.modelId || MODEL_ID;
+function defaultVoiceId() {
+  return String(process.env.ELEVENLABS_VOICE_ID || "").trim();
+}
 
-  ensureDir(AUDIO_DIR);
+function apiKey() {
+  return String(process.env.ELEVENLABS_API_KEY || "").trim();
+}
 
-  // cache por texto/voz (evita gerar de novo em testes)
-  const key = hashText(text, voiceId);
-  const filename = `${key}.mp3`;
-  const filepath = path.join(AUDIO_DIR, filename);
+function modelId() {
+  return String(process.env.TTS_MODEL_ID || "eleven_multilingual_v2").trim();
+}
 
-  if (!fs.existsSync(filepath)) {
-    const url = `https://api.elevenlabs.io/v1/text-to-speech/${voiceId}`;
+function randomId(len = 6) {
+  return crypto.randomBytes(len).toString("hex");
+}
 
-    const resp = await fetch(url, {
+function safeFileName(prefix = "tts") {
+  return `${prefix}_${Date.now()}_${randomId()}.mp3`;
+}
+
+/* ======================
+   ElevenLabs (FAIL-SAFE)
+====================== */
+async function elevenLabsTtsToMp3Buffer({ text, voiceId }) {
+  const key = apiKey();
+  const vid = String(voiceId || defaultVoiceId()).trim();
+
+  // 🔒 Bloqueios silenciosos
+  if (!key || !vid || !text) {
+    console.warn("⚠️ TTS ignorado (key/voice/text ausente)");
+    return null;
+  }
+
+  try {
+    const res = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${vid}`, {
       method: "POST",
       headers: {
-        "xi-api-key": ELEVEN_API_KEY,
+        "xi-api-key": key,
         "Content-Type": "application/json",
-        "Accept": "audio/mpeg",
+        Accept: "audio/mpeg",
       },
       body: JSON.stringify({
         text,
-        model_id: modelId,
-        // você pode ajustar voice_settings depois, se quiser
+        model_id: modelId(),
         voice_settings: {
-          stability: 0.45,
-          similarity_boost: 0.75,
+          stability: 0.4,
+          similarity_boost: 0.8,
         },
       }),
     });
 
-    if (!resp.ok) {
-      const errTxt = await resp.text().catch(() => "");
-      throw new Error(`ElevenLabs error: ${resp.status} ${errTxt}`);
+    if (!res.ok) {
+      console.warn(`⚠️ ElevenLabs respondeu ${res.status} — TTS ignorado`);
+      return null;
     }
 
-    const arrayBuffer = await resp.arrayBuffer();
-    fs.writeFileSync(filepath, Buffer.from(arrayBuffer));
+    const buffer = Buffer.from(await res.arrayBuffer());
+    return { buffer, voice_id: vid };
+  } catch (err) {
+    console.warn("⚠️ Erro ao chamar ElevenLabs — TTS ignorado");
+    return null;
   }
-
-  const publicUrl = `${PUBLIC_BASE_URL}/media/audio/${filename}`;
-
-  // duração: (opcional) você pode calcular com lib, mas por enquanto deixa null
-  return {
-    audio_url: publicUrl,
-    audio_duration_ms: null,
-    audio_voice_id: voiceId,
-    has_audio: 1,
-    filename,
-  };
 }
+
+/* ======================
+   API pública
+====================== */
+async function synthesizeToFile({ text, voiceId, fileName }) {
+  const t = String(text || "").trim();
+  if (!t) return null;
+
+  const audio = await elevenLabsTtsToMp3Buffer({ text: t, voiceId });
+  if (!audio) return null;
+
+  try {
+    const dir = audioDir();
+    ensureDir(dir);
+
+    const finalName = fileName || safeFileName("tts");
+    const filePath = path.resolve(dir, finalName);
+
+    fs.writeFileSync(filePath, audio.buffer);
+
+    return {
+      ok: true,
+      fileName: finalName,
+      filePath,
+      audio_url: `${baseUrl()}/media/audio/${encodeURIComponent(finalName)}`,
+      audio_duration_ms: null,
+      audio_voice_id: audio.voice_id,
+    };
+  } catch (err) {
+    console.warn("⚠️ Falha ao salvar áudio — TTS ignorado");
+    return null;
+  }
+}
+
+module.exports = {
+  synthesizeToFile,
+};

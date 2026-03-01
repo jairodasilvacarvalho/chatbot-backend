@@ -13,3 +13,22 @@ database.sqlite
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
+
+# SQLite WAL/SHM (arquivos temporários do SQLite)
+*.sqlite-wal
+*.sqlite-shm
+*.sqlite-journal
+
+# DB Browser for SQLite (projetos)
+*.sqbpro
+
+# Storage / uploads locais
+storage/
+
+# Arquivos de debug e testes soltos
+debug*.js
+check*.js
+backup-staged.patch
+
+# Outros
+*.log
