@@ -1,33 +1,33 @@
-// services/agent.js
-// ✅ Retorna { type, text, facts } para o core persistir facts_json
-// ✅ Normaliza fatos antigos (closing/payment/shipping) para não competir com checkout
-// ✅ Fix do loop: no máximo 1 awaiting_* ativo + reset ao "quero comprar" e ao concluir checkout
-// ✅ Finalização: salva last_order e limpa pendências corretamente
-// ✅ Aplica Treino Humano nas mensagens do funil sem quebrar lógica
-// ✅ Usa loader oficial getEffectiveTraining() (fallback + contrato único)
-// ✅ Integra LLM real (src/core/agentLLM.js) fora do checkout, com stageContext + facts + training
-// ✅ FIX: LLM não fica bloqueado após co.sent=true
-// ✅ Logs: LLM CHECK + ENTER LLM + ENTER CHECKOUT + LLM DECISION
-// ✅ Normalização robusta p/ gatilhos (remove acentos + lida com "�" / mojibake)
-// ✅ Fallback específico para 429/quota
-// ✅ LLM híbrido dentro do checkout: responde objeção e volta pra pergunta pendente (sem quebrar estado)
-// ✅ Anti-loop: evita usar LLM 2x para o mesmo inbound durante checkout
-// ✅ Stage Sync: mantém customers.stage consistente com facts.stage
-// ✅ Classificador LLM em JSON no checkout (objection|checkout_data|other) + anti-loop próprio
-// ✅ HARD RULE no classificador (pending manda; heurística forte bypass; field != pending ignora)
-// ✅ (PASSO 5.5) BYPASS product_intelligence fora do checkout, antes do LLM
-// ✅ (FIX) Playbook Pitch ABERTURA + DIAGNOSTICO (antes do LLM) com anti-spam (facts_json)
-// ✅ (FIX CRÍTICO) Normalização de product_key: sempre usa DEFAULT (caps) como padrão e normaliza case
-// ✅ (FIX CRÍTICO) Debug PLAYBOOK INFO para enxergar product_key real + pitch_by_stage carregado
-// ✅ (FIX CRÍTICO) Preserva facts.pitches_sent e demais campos ao aplicar defaults (não “zera”)
-// ✅ (FIX CRÍTICO) Fallback "oi" não repete exatamente a ABERTURA quando pitches_sent.abertura=true
-// ✅ (FIX CRÍTICO) Persistência: respond() pode persistir facts_json em modo AUTO (evita perder anti-spam)
-// ✅ (FIX CRÍTICO) ATALHO POS-CHECKOUT agora DENTRO do run() (resolve "await is only valid in async functions")
-// ✅ (FIX AGORA) Router "preço/valor/quanto custa" => OFERTA antes do nudge/abertura
-// ✅ (FIX AGORA) Anti-loop do nudge genérico ganha do fluxo (nudge detectado + alternativa + flag persistida)
-// ✅ (FIX) Correção de shape: campos checkout string/nullable não forçam typeof "string" quando null
-// ✅ (FIX) buildClassifierKey não usa customer_phone (evita inconsistência)
-// ✅ (FIX AGORA) llm_class_last_key centralizado: única escrita via helper setCheckoutClassKeySafe()
+﻿// services/agent.js
+// Ô£à Retorna { type, text, facts } para o core persistir facts_json
+// Ô£à Normaliza fatos antigos (closing/payment/shipping) para n├úo competir com checkout
+// Ô£à Fix do loop: no m├íximo 1 awaiting_* ativo + reset ao "quero comprar" e ao concluir checkout
+// Ô£à Finaliza├º├úo: salva last_order e limpa pend├¬ncias corretamente
+// Ô£à Aplica Treino Humano nas mensagens do funil sem quebrar l├│gica
+// Ô£à Usa loader oficial getEffectiveTraining() (fallback + contrato ├║nico)
+// Ô£à Integra LLM real (src/core/agentLLM.js) fora do checkout, com stageContext + facts + training
+// Ô£à FIX: LLM n├úo fica bloqueado ap├│s co.sent=true
+// Ô£à Logs: LLM CHECK + ENTER LLM + ENTER CHECKOUT + LLM DECISION
+// Ô£à Normaliza├º├úo robusta p/ gatilhos (remove acentos + lida com "´┐¢" / mojibake)
+// Ô£à Fallback espec├¡fico para 429/quota
+// Ô£à LLM h├¡brido dentro do checkout: responde obje├º├úo e volta pra pergunta pendente (sem quebrar estado)
+// Ô£à Anti-loop: evita usar LLM 2x para o mesmo inbound durante checkout
+// Ô£à Stage Sync: mant├®m customers.stage consistente com facts.stage
+// Ô£à Classificador LLM em JSON no checkout (objection|checkout_data|other) + anti-loop pr├│prio
+// Ô£à HARD RULE no classificador (pending manda; heur├¡stica forte bypass; field != pending ignora)
+// Ô£à (PASSO 5.5) BYPASS product_intelligence fora do checkout, antes do LLM
+// Ô£à (FIX) Playbook Pitch ABERTURA + DIAGNOSTICO (antes do LLM) com anti-spam (facts_json)
+// Ô£à (FIX CR├ìTICO) Normaliza├º├úo de product_key: sempre usa DEFAULT (caps) como padr├úo e normaliza case
+// Ô£à (FIX CR├ìTICO) Debug PLAYBOOK INFO para enxergar product_key real + pitch_by_stage carregado
+// Ô£à (FIX CR├ìTICO) Preserva facts.pitches_sent e demais campos ao aplicar defaults (n├úo ÔÇ£zeraÔÇØ)
+// Ô£à (FIX CR├ìTICO) Fallback "oi" n├úo repete exatamente a ABERTURA quando pitches_sent.abertura=true
+// Ô£à (FIX CR├ìTICO) Persist├¬ncia: respond() pode persistir facts_json em modo AUTO (evita perder anti-spam)
+// Ô£à (FIX CR├ìTICO) ATALHO POS-CHECKOUT agora DENTRO do run() (resolve "await is only valid in async functions")
+// Ô£à (FIX AGORA) Router "pre├ºo/valor/quanto custa" => OFERTA antes do nudge/abertura
+// Ô£à (FIX AGORA) Anti-loop do nudge gen├®rico ganha do fluxo (nudge detectado + alternativa + flag persistida)
+// Ô£à (FIX) Corre├º├úo de shape: campos checkout string/nullable n├úo for├ºam typeof "string" quando null
+// Ô£à (FIX) buildClassifierKey n├úo usa customer_phone (evita inconsist├¬ncia)
+// Ô£à (FIX AGORA) llm_class_last_key centralizado: ├║nica escrita via helper setCheckoutClassKeySafe()
 
 console.log("### LOADED services/agent.js ###", __filename);
 
@@ -57,19 +57,19 @@ function normalizeText(t) {
 }
 
 /**
- * Normaliza para match/heurísticas:
+ * Normaliza para match/heur├¡sticas:
  * - lower
  * - remove acentos
- * - remove mojibake "�" (U+FFFD) para não travar gatilhos
- * - compacta espaços
+ * - remove mojibake "´┐¢" (U+FFFD) para n├úo travar gatilhos
+ * - compacta espa├ºos
  */
 function normalizeForMatch(input) {
   let s = normalizeText(input);
 
-  // ✅ FIX: remove caractere de substituição "�" (mojibake)
-  // Ex: "t� caro" -> "t caro"
+  // Ô£à FIX: remove caractere de substitui├º├úo "´┐¢" (mojibake)
+  // Ex: "t´┐¢ caro" -> "t caro"
   s = s.replace(/\uFFFD/g, " ");
-  s = s.replace(/�/g, " ");
+  s = s.replace(/´┐¢/g, " ");
 
   // lower + remove acentos
   s = s
@@ -77,7 +77,7 @@ function normalizeForMatch(input) {
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "");
 
-  // compacta espaços
+  // compacta espa├ºos
   s = s.replace(/\s+/g, " ").trim();
 
   return s;
@@ -139,22 +139,22 @@ function isPriceIntent(text) {
   const patterns = [
     "quanto custa",
     "quanto e",
-    "quanto é",
+    "quanto ├®",
     "qual o preco",
     "qual preco",
     "qual o valor",
     "qual valor",
     "preco",
     "valor",
-    "preço",
+    "pre├ºo",
     "custa",
-    "tá quanto",
+    "t├í quanto",
     "ta quanto",
   ];
 
-  // patterns já estão "limpos" via normalizeForMatch na comparação
+  // patterns j├í est├úo "limpos" via normalizeForMatch na compara├º├úo
   if (patterns.some((p) => t.includes(normalizeForMatch(p)))) return true;
-  if (t.startsWith("quanto") && (t.includes("custa") || t.includes("e") || t.includes("é"))) return true;
+  if (t.startsWith("quanto") && (t.includes("custa") || t.includes("e") || t.includes("├®"))) return true;
   return false;
 }
 
@@ -164,11 +164,11 @@ function isPingLike(text) {
   return (
     !inboundNorm ||
     inboundNorm.length <= 3 ||
-    ["oi", "ola", "olá", "ok", "blz", "bom dia", "boa tarde", "boa noite"].includes(inboundNormMatch)
+    ["oi", "ola", "ol├í", "ok", "blz", "bom dia", "boa tarde", "boa noite"].includes(inboundNormMatch)
   );
 }
 /* ======================
-   Facts defaults / shape (FIX CRÍTICO)
+   Facts defaults / shape (FIX CR├ìTICO)
 ====================== */
 function ensureFactsShape(facts) {
   const f = facts && typeof facts === "object" ? facts : {};
@@ -186,7 +186,11 @@ function ensureFactsShape(facts) {
   if (typeof co.sent !== "boolean") co.sent = false;
   if (typeof co.missing !== "boolean") co.missing = false;
 
-  // ✅ nullable strings (null é permitido)
+
+  // Hybrid cooldown
+  co.last_hybrid_at = Number(co.last_hybrid_at || 0);
+  co.last_hybrid_inbound_key = String(co.last_hybrid_inbound_key || "");
+  // Ô£à nullable strings (null ├® permitido)
   if (co.cep == null) co.cep = null;
   if (co.payment == null) co.payment = null;
   if (co.channel == null) co.channel = null;
@@ -195,7 +199,7 @@ function ensureFactsShape(facts) {
   if (co.checkout_url == null) co.checkout_url = null;
   if (co.sent_at == null) co.sent_at = null;
 
-  // anti-loop (não apagar)
+  // anti-loop (n├úo apagar)
   if (co.llm_last_inbound_key == null) co.llm_last_inbound_key = null;
   if (co.llm_class_last_key == null) co.llm_class_last_key = null;
   if (co.pending_question_last_inbound_key == null) co.pending_question_last_inbound_key = null;
@@ -211,7 +215,7 @@ function ensureFactsShape(facts) {
 }
 
 /**
- * ✅ Aplica defaults SEM apagar campos existentes (principalmente pitches_sent).
+ * Ô£à Aplica defaults SEM apagar campos existentes (principalmente pitches_sent).
  */
 function ensureFactsDefaults(facts, customer) {
   const f = ensureFactsShape(facts);
@@ -514,7 +518,7 @@ function applyPolicies({ policies_json, textOut, facts }) {
   for (const phrase of forbidden) {
     const p = normalizeForMatch(phrase);
     if (p && normalizeForMatch(out).includes(p)) {
-      out = "Entendi. Vou te ajudar por aqui com as informações certas. 🙂";
+      out = "Entendi. Vou te ajudar por aqui com as informa├º├Áes certas. ­ƒÖé";
       break;
     }
   }
@@ -601,11 +605,11 @@ async function getCheckoutUrl({ tenant_id, product_key, channel }) {
    Training formatting
 ====================== */
 function textHasEmoji(t) {
-  return /[😊🙂✅🔥👉➡️]/.test(t);
+  return /[­ƒÿè­ƒÖéÔ£à­ƒöÑ­ƒæëÔ×í´©Å]/.test(t);
 }
 function removeKnownEmojis(t) {
   return String(t ?? "")
-    .replace(/[😊🙂✅🔥👉➡️]/g, "")
+    .replace(/[­ƒÿè­ƒÖéÔ£à­ƒöÑ­ƒæëÔ×í´©Å]/g, "")
     .replace(/\s{2,}/g, " ")
     .trim();
 }
@@ -632,11 +636,11 @@ function applyTrainingToOutgoing(text, ht = {}, stage = "") {
 
   if (isNoEmojiPolicy(ht.emoji_usage)) out = removeKnownEmojis(out);
   else if (isHighEmojiPolicy(ht.emoji_usage)) {
-    if (!textHasEmoji(out)) out = out + " 🙂";
+    if (!textHasEmoji(out)) out = out + " ­ƒÖé";
   }
 
   const energy = normalizeForMatch(ht.energy);
-  if (energy.includes("baixa")) out = out.replace(/!{2,}/g, "!").replace(/😊|🙂/g, "").trim();
+  if (energy.includes("baixa")) out = out.replace(/!{2,}/g, "!").replace(/­ƒÿè|­ƒÖé/g, "").trim();
 
   if (isMoreDirectPressure(ht.pressure_level)) out = out.replace(/\s*\n\s*\n/g, "\n").trim();
 
@@ -654,26 +658,26 @@ function applyTrainingToOutgoing(text, ht = {}, stage = "") {
 function humanAskCep(ht) {
   const informal = isInformalLanguage(ht.language_level, ht.tone_style);
   const msg = informal
-    ? "Fechou! Me passa teu *CEP* (ex: 01001-000) pra eu ver o prazo 🙂"
-    : "Perfeito! 😊 Me passa seu *CEP* (ex: 01001-000) pra calcular o prazo.";
+    ? "Fechou! Me passa teu *CEP* (ex: 01001-000) pra eu ver o prazo ­ƒÖé"
+    : "Perfeito! ­ƒÿè Me passa seu *CEP* (ex: 01001-000) pra calcular o prazo.";
   return applyTrainingToOutgoing(msg, ht, "ask_cep");
 }
 function humanAskPayment(ht) {
   const informal = isInformalLanguage(ht.language_level, ht.tone_style);
-  const msg = informal ? "Boa! Vai pagar no *PIX* ou no *cartão*? 🙂" : "Show! Você prefere pagar no *PIX* ou *cartão*? 🙂";
+  const msg = informal ? "Boa! Vai pagar no *PIX* ou no *cart├úo*? ­ƒÖé" : "Show! Voc├¬ prefere pagar no *PIX* ou *cart├úo*? ­ƒÖé";
   return applyTrainingToOutgoing(msg, ht, "ask_payment");
 }
 function humanAskChannel(ht) {
   const informal = isInformalLanguage(ht.language_level, ht.tone_style);
-  const msg = informal ? "Qual canal você quer? *Amazon* / *Mercado Livre* / *Loja oficial*" : "Confirma o canal: *Amazon* / *Mercado Livre* / *Loja oficial*?";
+  const msg = informal ? "Qual canal voc├¬ quer? *Amazon* / *Mercado Livre* / *Loja oficial*" : "Confirma o canal: *Amazon* / *Mercado Livre* / *Loja oficial*?";
   return applyTrainingToOutgoing(msg, ht, "ask_channel");
 }
 function humanAskAffiliateLink(channel, ht) {
   const label = channel === "amazon" ? "Amazon" : channel === "mercado_livre" ? "Mercado Livre" : "Loja oficial";
   const informal = isInformalLanguage(ht.language_level, ht.tone_style);
   const msg = informal
-    ? `Show ✅ Canal: *${label}*. Agora me manda teu link do produto (afiliado) pra eu te passar o final aqui 🙂`
-    : `Perfeito ✅ Canal escolhido: *${label}*. Agora me manda o link do produto (seu link de afiliado) pra eu te entregar aqui e finalizar 🙂`;
+    ? `Show Ô£à Canal: *${label}*. Agora me manda teu link do produto (afiliado) pra eu te passar o final aqui ­ƒÖé`
+    : `Perfeito Ô£à Canal escolhido: *${label}*. Agora me manda o link do produto (seu link de afiliado) pra eu te entregar aqui e finalizar ­ƒÖé`;
   return applyTrainingToOutgoing(msg, ht, "ask_affiliate");
 }
 function humanSendFinalLink(url, ht) {
@@ -682,31 +686,31 @@ function humanSendFinalLink(url, ht) {
 
   let msg;
   if (direct) msg = `Link pra finalizar: ${url}`;
-  else if (informal) msg = `Pronto ✅ Finaliza por aqui: ${url}`;
-  else msg = `Perfeito ✅ Finalize por aqui: ${url}`;
+  else if (informal) msg = `Pronto Ô£à Finaliza por aqui: ${url}`;
+  else msg = `Perfeito Ô£à Finalize por aqui: ${url}`;
 
   return applyTrainingToOutgoing(msg, ht, "send_final");
 }
 function humanInvalidCep(ht) {
   const informal = isInformalLanguage(ht.language_level, ht.tone_style);
-  const msg = informal ? "Me manda o CEP assim: *01001-000* 🙂" : "Me manda seu CEP nesse formato: *01001-000* 🙂";
+  const msg = informal ? "Me manda o CEP assim: *01001-000* ­ƒÖé" : "Me manda seu CEP nesse formato: *01001-000* ­ƒÖé";
   return applyTrainingToOutgoing(msg, ht, "invalid");
 }
 function humanInvalidPayment(ht) {
-  const msg = "Só pra eu seguir: você prefere *PIX* ou *cartão*? 🙂";
+  const msg = "S├│ pra eu seguir: voc├¬ prefere *PIX* ou *cart├úo*? ­ƒÖé";
   return applyTrainingToOutgoing(msg, ht, "invalid");
 }
 function humanInvalidAffiliateLink(ht) {
-  const msg = "Me manda o *link completo* (começando com http/https) pra eu finalizar 🙂";
+  const msg = "Me manda o *link completo* (come├ºando com http/https) pra eu finalizar ­ƒÖé";
   return applyTrainingToOutgoing(msg, ht, "invalid");
 }
 function humanLLMQuotaFallback(ht) {
-  const msg = "Entendi. 🙂 Quer que eu te passe a opção mais em conta ou prefere que eu te explique o custo-benefício rapidinho?";
+  const msg = "Entendi. ­ƒÖé Quer que eu te passe a op├º├úo mais em conta ou prefere que eu te explique o custo-benef├¡cio rapidinho?";
   return applyTrainingToOutgoing(msg, ht, "fallback_llm_429");
 }
 
 /* ======================
-   Heurística: quando chamar o LLM fora do checkout
+   Heur├¡stica: quando chamar o LLM fora do checkout
 ====================== */
 function shouldUseLLMOutsideCheckout(text) {
   const t = normalizeForMatch(text);
@@ -749,7 +753,7 @@ function shouldUseLLMOutsideCheckout(text) {
 }
 
 /* ======================
-   ✅ LLM híbrido dentro do checkout (pergunta pendente)
+   Ô£à LLM h├¡brido dentro do checkout (pergunta pendente)
 ====================== */
 function markPendingQuestionAppendedForInbound(facts, inboundKey) {
   if (!facts) return;
@@ -797,16 +801,16 @@ function looksLikeObjection(textRaw) {
   const t = normalizeForMatch(textRaw || "");
   const patterns = [
     "ta caro",
-    "tá caro",
+    "t├í caro",
     "caro",
     "preco",
-    "preço",
+    "pre├ºo",
     "valor",
     "desconto",
     "mais barato",
     "frete caro",
     "nao confio",
-    "não confio",
+    "n├úo confio",
     "golpe",
     "reclame aqui",
     "demora",
@@ -814,7 +818,7 @@ function looksLikeObjection(textRaw) {
     "quando chega",
     "vou pensar",
     "desisti",
-    "não quero",
+    "n├úo quero",
     "nao quero",
     "humano",
     "atendente",
@@ -824,7 +828,7 @@ function looksLikeObjection(textRaw) {
 }
 
 /* ======================
-   ✅ Classificador LLM no checkout (PASSO 4)
+   Ô£à Classificador LLM no checkout (PASSO 4)
 ====================== */
 function getPendingFieldFromCheckout(co) {
   if (!co) return null;
@@ -883,13 +887,13 @@ async function classifyInboundInCheckoutLLM({ tenant_id, product_key, facts, co,
     'type: "objection" | "checkout_data" | "other"\n' +
     'field: "cep" | "payment" | "channel" | "affiliate_link" | null\n' +
     'value: string | null\n' +
-    "confidence: número 0..1\n" +
+    "confidence: n├║mero 0..1\n" +
     "Regras DURAS:\n" +
     `- Estamos aguardando SOMENTE o campo: ${pendingField}.\n` +
-    `- Se o texto NÃO contiver claramente esse campo (${pendingField}), retorne type="other".\n` +
-    `- Se for objeção (preço, medo, comparação, dúvida, desconfiança): type="objection".\n` +
+    `- Se o texto N├âO contiver claramente esse campo (${pendingField}), retorne type="other".\n` +
+    `- Se for obje├º├úo (pre├ºo, medo, compara├º├úo, d├║vida, desconfian├ºa): type="objection".\n` +
     "- Nunca retorne um field diferente do pending.\n" +
-    "Não inclua texto fora do JSON.";
+    "N├úo inclua texto fora do JSON.";
 
   const stageContext = {
     stage: facts.stage || "checkout",
@@ -915,14 +919,14 @@ async function classifyInboundInCheckoutLLM({ tenant_id, product_key, facts, co,
     if (err?.code === "LLM_QUOTA" || msg.includes("429") || msg.toLowerCase().includes("quota")) {
       return { type: "other", field: null, value: null, confidence: 0 };
     }
-    console.error("❌ [agent] classifier LLM error:", msg);
+    console.error("ÔØî [agent] classifier LLM error:", msg);
     return { type: "other", field: null, value: null, confidence: 0 };
   }
 }
 
 /* ======================
-   ✅ ClassKey SAFE (centralizado)
-   - ÚNICO lugar que grava co.llm_class_last_key (exceto reset/finish => null)
+   Ô£à ClassKey SAFE (centralizado)
+   - ├ÜNICO lugar que grava co.llm_class_last_key (exceto reset/finish => null)
 ====================== */
 function validatePendingInputOrNull({ pendingField, text }) {
   const raw = normalizeText(text);
@@ -940,7 +944,7 @@ function validatePendingInputOrNull({ pendingField, text }) {
     const token = String(chTry || "").toLowerCase().replace(/\s+/g, "_");
 
     const allowed = new Set(["amazon", "mercado_livre", "loja_oficial"]);
-    const blocked = new Set(["pix", "cartao", "cartão", "whatsapp", "instagram", "telegram"]);
+    const blocked = new Set(["pix", "cartao", "cart├úo", "whatsapp", "instagram", "telegram"]);
 
     if (!chTry || blocked.has(token) || !allowed.has(token)) return { ok: false, reason: "invalid_channel" };
     return { ok: true, normalized: chTry };
@@ -950,7 +954,7 @@ function validatePendingInputOrNull({ pendingField, text }) {
     if (looksLikeUrl(raw)) return { ok: false, reason: "url_in_payment" };
     const payTry = normalizePayment(raw); // "pix" | "cartao"
     const token = String(payTry || "").toLowerCase().replace(/\s+/g, "_");
-    const allowed = new Set(["pix", "cartao", "cartão"]);
+    const allowed = new Set(["pix", "cartao", "cart├úo"]);
     if (!payTry || !allowed.has(token)) return { ok: false, reason: "invalid_payment" };
     return { ok: true, normalized: payTry };
   }
@@ -1004,9 +1008,9 @@ async function maybeSyncStageToDB({ tenant_id, customer, facts }) {
       }
     }
 
-    console.warn("⚠️ [agent] stage sync: nenhuma linha atualizada", { tenant_id, customerId, phone, desired });
+    console.warn("ÔÜá´©Å [agent] stage sync: nenhuma linha atualizada", { tenant_id, customerId, phone, desired });
   } catch (e) {
-    console.error("❌ [agent] stage sync failed:", e?.message || String(e));
+    console.error("ÔØî [agent] stage sync failed:", e?.message || String(e));
   }
 }
 
@@ -1040,7 +1044,7 @@ async function persistFactsJson({ tenant_id, customer, facts }) {
       if (okPhone) return;
     }
 
-    console.warn("⚠️ [agent] persist facts_json: nenhuma linha atualizada", { tenant_id, customerId, phone });
+    console.warn("ÔÜá´©Å [agent] persist facts_json: nenhuma linha atualizada", { tenant_id, customerId, phone });
   } catch (e) {
     console.warn("[agent] WARN persist facts_json failed", { tenant_id, customerId, phone, err: String(e?.message || e) });
   }
@@ -1098,7 +1102,7 @@ async function respond({ tenant_id, customer, facts, payload }) {
 }
 
 /* ==========================================================
-   ✅ PASSO 5.5 — BYPASS product_intelligence
+   Ô£à PASSO 5.5 ÔÇö BYPASS product_intelligence
 ========================================================== */
 function buildIntelBypassResponse({ text, product_intelligence }) {
   if (!text) return null;
@@ -1139,7 +1143,7 @@ function buildIntelBypassResponse({ text, product_intelligence }) {
 }
 
 /* ======================
-   Controle de duplicação no híbrido
+   Controle de duplica├º├úo no h├¡brido
 ====================== */
 function answerAlreadyMentionsPending(answer, pendingField) {
   const a = normalizeForMatch(answer || "");
@@ -1154,7 +1158,7 @@ function answerAlreadyMentionsPending(answer, pendingField) {
 }
 
 /* ======================
-   DB helper: primeira interação real (inbound)
+   DB helper: primeira intera├º├úo real (inbound)
 ====================== */
 async function inboundCountByPhone({ tenant_id, phone }) {
   if (!tenant_id || !phone) return 0;
@@ -1203,7 +1207,7 @@ async function run({ tenant_id, customer, incomingText, decision }) {
   facts = normalizeFactsForCheckout(facts);
   facts = ensureFactsDefaults(facts, customer);
 
-  // ✅ STAGE SYNC (load): customers.stage ↔ facts.stage
+  // Ô£à STAGE SYNC (load): customers.stage Ôåö facts.stage
   {
     const dbStage = String(customer?.stage || "").trim();
     const factsStage = String(facts?.stage || "").trim();
@@ -1266,7 +1270,7 @@ async function run({ tenant_id, customer, incomingText, decision }) {
   if (co.awaiting_payment && co.payment) co.awaiting_payment = false;
   if (co.awaiting_cep && co.cep) co.awaiting_cep = false;
 
-  // se sent => mata awaitings e garante pos_checkout (mas NÃO bloqueia LLM fora do checkout)
+  // se sent => mata awaitings e garante pos_checkout (mas N├âO bloqueia LLM fora do checkout)
   if (co.sent) {
     co.awaiting_cep = false;
     co.awaiting_payment = false;
@@ -1307,7 +1311,7 @@ async function run({ tenant_id, customer, incomingText, decision }) {
   });
 
   /* ==========================================================
-     ✅ ATALHO POS-CHECKOUT (DENTRO do run)
+     Ô£à ATALHO POS-CHECKOUT (DENTRO do run)
   ========================================================== */
   if (!needsCheckoutFlow && facts?.stage === "pos_checkout" && co?.sent === true) {
     console.log("[agent] POS_CHECKOUT GUARD -> HIT", { tenant_id, phone, inbound: String(text || ""), sent_at: co?.sent_at });
@@ -1334,16 +1338,16 @@ async function run({ tenant_id, customer, incomingText, decision }) {
     }
 
     const msg =
-      "Fechou ✅ Seu link já foi enviado. " +
+      "Fechou Ô£à Seu link j├í foi enviado. " +
       "Se quiser *comprar de novo*, diga **quero comprar**. " +
-      "Se tiver alguma dúvida, me chama aqui 🙂";
+      "Se tiver alguma d├║vida, me chama aqui ­ƒÖé";
 
     const out = applyTrainingToOutgoing(msg, humanTraining, "pos_checkout_nudge");
     return await respond({ tenant_id, customer, facts, payload: { type: "text", text: out, facts } });
   }
 
   /* ==========================================================
-     ✅ BLOCO PRÉ-LLM (fora do checkout)
+     Ô£à BLOCO PR├ë-LLM (fora do checkout)
 ========================================================== */
   if (!needsCheckoutFlow) {
     const inboundNorm = normalizeText(text);
@@ -1353,7 +1357,7 @@ async function run({ tenant_id, customer, incomingText, decision }) {
     facts.last_reason = pb ? (pbWrap?.fallback_used ? "playbook_default_fallback" : "playbook_product") : "playbook_missing";
 
     /* ======================
-       (1) Router PREÇO => OFERTA (ANTES de nudge/abertura)
+       (1) Router PRE├çO => OFERTA (ANTES de nudge/abertura)
     ====================== */
     if (isPriceIntent(inboundNorm)) {
       facts.stage = "oferta";
@@ -1370,8 +1374,8 @@ async function run({ tenant_id, customer, incomingText, decision }) {
       }
 
       const fallback =
-        "Consigo te passar o valor certinho 🙂\n" +
-        "Só me diz: qual produto você quer (ou qual modelo/kit)?";
+        "Consigo te passar o valor certinho ­ƒÖé\n" +
+        "S├│ me diz: qual produto voc├¬ quer (ou qual modelo/kit)?";
       const out = applyTrainingToOutgoing(fallback, humanTraining, "router_preco_fallback");
       console.log("[agent] ROUTER PRECO -> OFERTA (fallback)", { tenant_id, phone, hasPitchOferta: !!pitchOferta });
 
@@ -1379,7 +1383,7 @@ async function run({ tenant_id, customer, incomingText, decision }) {
     }
 
     /* ======================
-       (2) Objection-first (GANHA da abertura/diagnóstico/nudge)
+       (2) Objection-first (GANHA da abertura/diagn├│stico/nudge)
     ====================== */
     if (pb?.objections_json) {
       try {
@@ -1444,11 +1448,11 @@ async function run({ tenant_id, customer, incomingText, decision }) {
     }
 
     /* ======================
-       (3) Anti-loop do NUDGE genérico (ganha do fluxo)
+       (3) Anti-loop do NUDGE gen├®rico (ganha do fluxo)
     ====================== */
     if (facts.stage === "abertura" && ping) {
       if (wasPitchSentFacts(facts, "abertura_nudge")) {
-        const alt = "Me diz só uma coisa pra eu te ajudar rápido: **qual produto** você quer ou **qual dúvida** você tem? 🙂";
+        const alt = "Me diz s├│ uma coisa pra eu te ajudar r├ípido: **qual produto** voc├¬ quer ou **qual d├║vida** voc├¬ tem? ­ƒÖé";
         const outAlt = applyTrainingToOutgoing(alt, humanTraining, "abertura_nudge_alt_no_repeat");
         facts._dirty = true;
 
@@ -1458,7 +1462,7 @@ async function run({ tenant_id, customer, incomingText, decision }) {
     }
 
     /* ======================
-       (4) DIAGNÓSTICO anti-repeat p/ ping
+       (4) DIAGN├ôSTICO anti-repeat p/ ping
     ====================== */
     if (facts.stage === "diagnostico") {
       const already = wasPitchSentFacts(facts, "diagnostico");
@@ -1466,8 +1470,8 @@ async function run({ tenant_id, customer, incomingText, decision }) {
 
       if (already && ping) {
         const nudge =
-          "Fechado 🙂 Me diz rapidinho o que você quer fazer: **comprar** ou **tirar uma dúvida**? " +
-          "Se quiser, já fala o produto/assunto também.";
+          "Fechado ­ƒÖé Me diz rapidinho o que voc├¬ quer fazer: **comprar** ou **tirar uma d├║vida**? " +
+          "Se quiser, j├í fala o produto/assunto tamb├®m.";
         const out = applyTrainingToOutgoing(nudge, humanTraining, "playbook_diag_nudge_no_repeat");
         console.log("[agent] DIAGNOSTICO (anti-repeat) -> nudge", { tenant_id, phone, inboundNorm });
 
@@ -1484,7 +1488,7 @@ async function run({ tenant_id, customer, incomingText, decision }) {
     }
 
     /* ======================
-       (5) ABERTURA 1x (primeira interação real) + anti-spam
+       (5) ABERTURA 1x (primeira intera├º├úo real) + anti-spam
     ====================== */
     try {
       if (phone) {
@@ -1566,11 +1570,11 @@ async function run({ tenant_id, customer, incomingText, decision }) {
           appliedText.startsWith("Oi!") &&
           appliedText.includes("Me diz rapidinho") &&
           appliedText.includes("comprar") &&
-          appliedText.includes("dúvida");
+          appliedText.includes("d├║vida");
 
         if (applied.facts?.stage === "abertura" && ping && isPlaybookNudge) {
           if (wasPitchSentFacts(applied.facts, "abertura_nudge")) {
-            const alt = "Me diz só uma coisa pra eu te ajudar rápido: **qual produto** você quer ou **qual dúvida** você tem? 🙂";
+            const alt = "Me diz s├│ uma coisa pra eu te ajudar r├ípido: **qual produto** voc├¬ quer ou **qual d├║vida** voc├¬ tem? ­ƒÖé";
             const outAlt = applyTrainingToOutgoing(alt, humanTraining, "abertura_nudge_alt_no_repeat");
             applied.facts._dirty = true;
 
@@ -1602,8 +1606,8 @@ async function run({ tenant_id, customer, incomingText, decision }) {
   }
 
 /* ==========================================================
-   ✅ 4.0) CHECKOUT: STRONG DETECT + HÍBRIDO (OBJEÇÃO) + CLASSIFICADOR (JSON) + HARD RULE
-   - Importante: llm_class_last_key só é escrito via setCheckoutClassKeySafe()
+   Ô£à 4.0) CHECKOUT: STRONG DETECT + H├ìBRIDO (OBJE├ç├âO) + CLASSIFICADOR (JSON) + HARD RULE
+   - Importante: llm_class_last_key s├│ ├® escrito via setCheckoutClassKeySafe()
 ========================================================== */
 if (needsCheckoutFlow) {
   const pendingField = getPendingFieldFromCheckout(co);
@@ -1702,8 +1706,8 @@ if (needsCheckoutFlow) {
     }
 
     /* ======================
-       ✅ 4.0.a.5) HÍBRIDO (OBJEÇÃO) — ANTES da validação dura
-       - Só entra se NÃO parece dado esperado do pending
+       Ô£à 4.0.a.5) H├ìBRIDO (OBJE├ç├âO) ÔÇö ANTES da valida├º├úo dura
+       - S├│ entra se N├âO parece dado esperado do pending
        - Anti-loop: 1x por inboundKey
     ====================== */
     {
@@ -1744,7 +1748,7 @@ if (needsCheckoutFlow) {
             userText: text,
           });
 
-          // marca anti-loop do híbrido
+          // marca anti-loop do h├¡brido
           markLLMUsedForInbound(facts, inboundKey);
 
           facts.llm = facts.llm && typeof facts.llm === "object" ? facts.llm : {};
@@ -1786,14 +1790,14 @@ if (needsCheckoutFlow) {
             });
           }
 
-          console.error("❌ [agent] LLM checkout_hybrid error:", msg);
-          // se falhar, segue pro fluxo abaixo (validação / classificador / determinístico)
+          console.error("ÔØî [agent] LLM checkout_hybrid error:", msg);
+          // se falhar, segue pro fluxo abaixo (valida├º├úo / classificador / determin├¡stico)
         }
       }
     }
 
     /* ======================
-       4.0.b) VALIDAÇÃO DURA
+       4.0.b) VALIDA├ç├âO DURA
     ====================== */
     const v = validatePendingInputOrNull({ pendingField, text });
 
@@ -1837,7 +1841,7 @@ if (needsCheckoutFlow) {
     /* ======================
        4.0.c) CLASSIFICADOR SEGURO
        - usa normalized pra classKey
-       - aplica cls.value diretamente (sem recursão run())
+       - aplica cls.value diretamente (sem recurs├úo run())
     ====================== */
     const norm = v.normalized;
 
@@ -1969,7 +1973,7 @@ if (needsCheckoutFlow) {
 } // <-- fecha needsCheckoutFlow
 
   /* ======================
-     ✅ 4.1) LLM híbrido dentro do checkout (objeção + volta p/ pending)
+     Ô£à 4.1) LLM h├¡brido dentro do checkout (obje├º├úo + volta p/ pending)
   ====================== */
   if (needsCheckoutFlow) {
     const inboundKey = buildInboundKey({ customer, decision, text });
@@ -2029,13 +2033,13 @@ if (needsCheckoutFlow) {
           return await respond({ tenant_id, customer, facts, payload: { type: "text", text: finalText, facts } });
         }
 
-        console.error("❌ [agent] LLM checkout_hybrid error:", msg);
+        console.error("ÔØî [agent] LLM checkout_hybrid error:", msg);
       }
     }
   }
 
   /* ======================
-     4.2) CEP (determinístico)
+     4.2) CEP (determin├¡stico)
   ====================== */
   if (co.awaiting_cep) {
     console.log("[agent] ENTER CHECKOUT (awaiting_cep)");
@@ -2055,7 +2059,7 @@ if (needsCheckoutFlow) {
   }
 
   /* ======================
-     4.3) Payment (determinístico)
+     4.3) Payment (determin├¡stico)
   ====================== */
   if (co.awaiting_payment) {
     console.log("[agent] ENTER CHECKOUT (awaiting_payment)");
@@ -2075,7 +2079,7 @@ if (needsCheckoutFlow) {
   }
 
   /* ======================
-     4.4) Channel (determinístico)
+     4.4) Channel (determin├¡stico)
   ====================== */
   if (co.awaiting_channel) {
     console.log("[agent] ENTER CHECKOUT (awaiting_channel)");
@@ -2105,7 +2109,7 @@ if (needsCheckoutFlow) {
   }
 
   /* ======================
-     4.5) Affiliate link (determinístico)
+     4.5) Affiliate link (determin├¡stico)
   ====================== */
   if (co.awaiting_affiliate_link) {
     console.log("[agent] ENTER CHECKOUT (awaiting_affiliate_link)");
@@ -2122,7 +2126,7 @@ if (needsCheckoutFlow) {
     return await respond({ tenant_id, customer, facts, payload: { type: "text", text: humanSendFinalLink(co.checkout_url, humanTraining), facts } });
   }
 
-  // 5) CEP “solto” inicia checkout inteligente
+  // 5) CEP ÔÇ£soltoÔÇØ inicia checkout inteligente
   if (!needsCheckoutFlow) {
     const maybeCep = normalizeCep(text);
     if (maybeCep) {
@@ -2140,7 +2144,7 @@ if (needsCheckoutFlow) {
   }
 
   /* ======================
-     ✅ 5.5) BYPASS INTELIGENTE — DIFERENCIAIS / BENEFÍCIOS
+     Ô£à 5.5) BYPASS INTELIGENTE ÔÇö DIFERENCIAIS / BENEF├ìCIOS
   ====================== */
   if (!needsCheckoutFlow) {
     const bypass = buildIntelBypassResponse({ text, product_intelligence });
@@ -2151,7 +2155,7 @@ if (needsCheckoutFlow) {
     }
   }
 
-  // trava: se está no diagnostico e ainda não enviou pitch, não deixa o LLM tomar o controle
+  // trava: se est├í no diagnostico e ainda n├úo enviou pitch, n├úo deixa o LLM tomar o controle
   const blockLLMForDiagPitch = !needsCheckoutFlow && facts?.stage === "diagnostico" && !wasPitchSentFacts(facts, "diagnostico");
 
   /* ======================
@@ -2182,14 +2186,14 @@ if (needsCheckoutFlow) {
         return await respond({ tenant_id, customer, facts, payload: { type: "text", text: humanLLMQuotaFallback(humanTraining), facts } });
       }
 
-      console.error("❌ [agent] LLM error:", msg);
+      console.error("ÔØî [agent] LLM error:", msg);
     }
   } else if (blockLLMForDiagPitch) {
     console.log("[agent] BLOCK LLM (waiting pitch diagnostico once)");
   }
 
   /* ======================
-     7) Fallback genérico (FIX: não repetir ABERTURA idêntica)
+     7) Fallback gen├®rico (FIX: n├úo repetir ABERTURA id├¬ntica)
   ====================== */
   const lower = normalizeForMatch(text);
   const hasOpened = wasPitchSentFacts(facts, "abertura");
@@ -2197,10 +2201,10 @@ if (needsCheckoutFlow) {
   let fallbackBase;
   if (lower === "oi") {
     fallbackBase = hasOpened
-      ? "Beleza 🙂 me diz: você quer comprar agora ou qual é a tua dúvida?"
-      : "Oi! 🙂 Me diz rapidinho: você quer comprar agora ou tirar uma dúvida?";
+      ? "Beleza ­ƒÖé me diz: voc├¬ quer comprar agora ou qual ├® a tua d├║vida?"
+      : "Oi! ­ƒÖé Me diz rapidinho: voc├¬ quer comprar agora ou tirar uma d├║vida?";
   } else {
-    fallbackBase = "Antes de te passar o melhor caminho, me diz: você quer comprar agora ou só tirar uma dúvida? 🙂";
+    fallbackBase = "Antes de te passar o melhor caminho, me diz: voc├¬ quer comprar agora ou s├│ tirar uma d├║vida? ­ƒÖé";
   }
 
   if (!needsCheckoutFlow && isPingLike(text) && fallbackBase.includes("Me diz rapidinho")) {
@@ -2214,3 +2218,5 @@ if (needsCheckoutFlow) {
 }
 
 module.exports = { run };
+
+
