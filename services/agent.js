@@ -1203,7 +1203,7 @@ async function run({ tenant_id, customer, incomingText, decision }) {
     console.log("[agent] FORCE LLM (OBJECTION FIRST)");
 
     try {
-      const stageContext = { stage: "abertura", goal: "resolver_objecao_e_avancar" };
+      const stageContext = { stage: "abertura", goal: "acolher_objecao_responder_com_seguranca_e_conduzir_para_proximo_microcompromisso_de_compra" };
 
       const llmOut = await generateLLMResponse({
         tenant_id,
@@ -1213,7 +1213,7 @@ async function run({ tenant_id, customer, incomingText, decision }) {
         userText: text,
       });
 
-      const finalText = applyTrainingToOutgoing(llmOut, humanTraining, "llm_objection_first");
+      const finalText = appendSmartAdvance(applyTrainingToOutgoing(llmOut, humanTraining, "llm_objection_first"), facts);
 
       return await respond({
         tenant_id,
@@ -1282,9 +1282,9 @@ async function run({ tenant_id, customer, incomingText, decision }) {
   if (looksLikeObjection(text)) {
     console.log("[agent] FORCE LLM (objection first)");
     try {
-      const stageContext = { stage: facts.stage || "abertura", goal: "resolver_objecao_e_avancar" };
+      const stageContext = { stage: facts.stage || "abertura", goal: "acolher_objecao_responder_com_seguranca_e_conduzir_para_proximo_microcompromisso_de_compra" };
       const llmOut = await generateLLMResponse({ tenant_id, product_key, facts, stageContext, userText: text });
-      const finalText = applyTrainingToOutgoing(llmOut, humanTraining, "llm_objection_first");
+      const finalText = appendSmartAdvance(applyTrainingToOutgoing(llmOut, humanTraining, "llm_objection_first"), facts);
       return await respond({ tenant_id, customer, facts, payload: { type: "text", text: finalText, facts } });
     } catch (err) {
       console.error("[agent] LLM objection-first error:", err);
@@ -1477,7 +1477,7 @@ async function run({ tenant_id, customer, incomingText, decision }) {
           facts.llm.last_used_at = null;
           facts.llm.last_reason = "playbook_objection_first";
 
-          const out = applyTrainingToOutgoing(chosen, humanTraining, `playbook_objection_${hit.key}`);
+          const out = appendSmartAdvance(applyTrainingToOutgoing(chosen, humanTraining, `playbook_objection_${hit.key}`), facts);
 
           console.log("[agent] OBJECTION-FIRST -> hit", {
             tenant_id,
@@ -2216,7 +2216,7 @@ if (needsCheckoutFlow) {
   ) {
     console.log("[agent] LLM OUTSIDE DEBUG", { stage: facts?.stage, needsCheckoutFlow, blockLLMForDiagPitch, shouldUseLLMOutsideCheckout: shouldUseLLMOutsideCheckout(text), looksLikeObjection: looksLikeObjection(text), text });    console.log("[agent] ENTER LLM");
     try {
-      const stageContext = { stage: facts.stage || "abertura", goal: "resolver_duvida_ou_objecao_e_avancar_1_passo" };
+      const stageContext = { stage: facts.stage || "abertura", goal: "responder_duvida_ou_objecao_com_clareza_e_levar_o_cliente_para_um_proximo_passo_de_compra_sem_pressionar" };
 
       const llmOut = await generateLLMResponse({ tenant_id, product_key, facts, stageContext, userText: text });
 
@@ -2282,6 +2282,30 @@ module.exports = { run };
 
 
 
+
+
+
+
+
+
+function appendSmartAdvance(text, facts) {
+  if (!text || typeof text !== "string") return text;
+
+  const t = text.toLowerCase();
+
+  // evita duplicar pergunta
+  if (t.includes("pix") || t.includes("cartão") || t.includes("cartao")) return text;
+
+  // se estiver em checkout ativo, não interferir
+  const checkout = facts?.checkout && typeof facts.checkout === "object" ? facts.checkout : null;
+  const hasActiveCheckout = !!(checkout && (checkout.awaiting_cep || checkout.awaiting_payment || checkout.awaiting_channel || checkout.awaiting_affiliate_link));
+  if (hasActiveCheckout) return text;
+
+  // condução suave de avanço
+  const advance = "\n\nSe fizer sentido pra você, posso te explicar rapidinho como funciona o pagamento 🙂 Você prefere pix ou cartão?";
+
+  return text + advance;
+}
 
 
 
