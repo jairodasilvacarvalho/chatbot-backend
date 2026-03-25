@@ -1,8 +1,9 @@
 ﻿node_modules/
-*.bak
-*.backup
-*.diff
-tmp_*
-cloudflared.exe
-*.exe
-.env
+*.sqlite
+*.sqlite-*
+*.sqbpro
+storage/audio/
+backup-*.patch
+debug_*.js
+check*.js
+db/
