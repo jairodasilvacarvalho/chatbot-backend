@@ -70,10 +70,13 @@ app.use("/media/audio", express.static(path.resolve(audioDir)));
 const verifyMetaSignature = require("./middlewares/verifyMetaSignature");
 const webhookHandler = require("./routes/webhook");
 
-app.post(
+app.use(
   "/webhook",
   express.raw({ type: "application/json" }),
-  verifyMetaSignature,
+  (req, res, next) => {
+    if (req.method === "POST") return verifyMetaSignature(req, res, next);
+    next();
+  },
   webhookHandler
 );
 
@@ -119,6 +122,12 @@ app.use("/admin", (req, res, next) => {
 });
 
 // ============================
+// 📊 ADMIN METRICS (NOVO)
+// ============================
+const adminMetricsRoutes = require("./routes/adminMetrics");
+app.use("/admin/metrics", adminMetricsRoutes);
+
+// ============================
 // 🔐 ROTAS ADMIN (JWT apenas)
 // ============================
 const adminRoutes = require("./routes/admin");
@@ -129,9 +138,7 @@ const productWizardRoutes = require("./routes/admin/productWizard");
 const adminLogoutRoutes = require("./routes/adminLogout");
 const adminProductsPlaybookRoutes = require("./routes/adminProductsPlaybook");
 
-// ⚠️ IMPORTANTE:
-// Montar o Playbook ANTES do adminRoutes
-// porque adminRoutes pode ter um 404 interno.
+// ⚠️ Playbook antes do adminRoutes
 app.use("/admin", adminProductsPlaybookRoutes);
 
 app.use("/admin", adminTrainingRoutes);
@@ -141,15 +148,6 @@ app.use("/admin/product-wizard", productWizardRoutes);
 
 // adminRoutes por último
 app.use("/admin", adminRoutes);
-
-app.use("/admin", adminLogoutRoutes);
-
-console.log("✅ adminProductsPlaybookRoutes mounted at /admin");
-
-// ============================
-// ❌ 404
-// ✅ REGISTRE A ROTA DO PLAYBOOK
-app.use("/admin", adminProductsPlaybookRoutes);
 
 app.use("/admin", adminLogoutRoutes);
 

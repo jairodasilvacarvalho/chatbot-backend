@@ -1,0 +1,3259 @@
+﻿diff --git "a/.\\services\\agent.git_base.js" "b/.\\services\\agent.js"
+index 76cb277..8d2fdb6 100644
+--- "a/.\\services\\agent.git_base.js"
++++ "b/.\\services\\agent.js"
+@@ -1,41 +1,42 @@
+ ´╗┐// services/agent.js
+-// ├ö┬ú├á Retorna { type, text, facts } para o core persistir facts_json
+-// ├ö┬ú├á Normaliza fatos antigos (closing/payment/shipping) para nÔö£├║o competir com checkout
+-// ├ö┬ú├á Fix do loop: no mÔö£├¡ximo 1 awaiting_* ativo + reset ao "quero comprar" e ao concluir checkout
+-// ├ö┬ú├á FinalizaÔö£┬║Ôö£├║o: salva last_order e limpa pendÔö£┬¼ncias corretamente
+-// ├ö┬ú├á Aplica Treino Humano nas mensagens do funil sem quebrar lÔö£Ôöégica
+-// ├ö┬ú├á Usa loader oficial getEffectiveTraining() (fallback + contrato Ôö£Ôòænico)
+-// ├ö┬ú├á Integra LLM real (src/core/agentLLM.js) fora do checkout, com stageContext + facts + training
+-// ├ö┬ú├á FIX: LLM nÔö£├║o fica bloqueado apÔö£Ôöés co.sent=true
+-// ├ö┬ú├á Logs: LLM CHECK + ENTER LLM + ENTER CHECKOUT + LLM DECISION
+-// ├ö┬ú├á NormalizaÔö£┬║Ôö£├║o robusta p/ gatilhos (remove acentos + lida com "┬┤ÔöÉ┬ó" / mojibake)
+-// ├ö┬ú├á Fallback especÔö£┬ífico para 429/quota
+-// ├ö┬ú├á LLM hÔö£┬íbrido dentro do checkout: responde objeÔö£┬║Ôö£├║o e volta pra pergunta pendente (sem quebrar estado)
+-// ├ö┬ú├á Anti-loop: evita usar LLM 2x para o mesmo inbound durante checkout
+-// ├ö┬ú├á Stage Sync: mantÔö£┬«m customers.stage consistente com facts.stage
+-// ├ö┬ú├á Classificador LLM em JSON no checkout (objection|checkout_data|other) + anti-loop prÔö£Ôöéprio
+-// ├ö┬ú├á HARD RULE no classificador (pending manda; heurÔö£┬ística forte bypass; field != pending ignora)
+-// ├ö┬ú├á (PASSO 5.5) BYPASS product_intelligence fora do checkout, antes do LLM
+-// ├ö┬ú├á (FIX) Playbook Pitch ABERTURA + DIAGNOSTICO (antes do LLM) com anti-spam (facts_json)
+-// ├ö┬ú├á (FIX CRÔö£├¼TICO) NormalizaÔö£┬║Ôö£├║o de product_key: sempre usa DEFAULT (caps) como padrÔö£├║o e normaliza case
+-// ├ö┬ú├á (FIX CRÔö£├¼TICO) Debug PLAYBOOK INFO para enxergar product_key real + pitch_by_stage carregado
+-// ├ö┬ú├á (FIX CRÔö£├¼TICO) Preserva facts.pitches_sent e demais campos ao aplicar defaults (nÔö£├║o ├ö├ç┬úzera├ö├ç├ÿ)
+-// ├ö┬ú├á (FIX CRÔö£├¼TICO) Fallback "oi" nÔö£├║o repete exatamente a ABERTURA quando pitches_sent.abertura=true
+-// ├ö┬ú├á (FIX CRÔö£├¼TICO) PersistÔö£┬¼ncia: respond() pode persistir facts_json em modo AUTO (evita perder anti-spam)
+-// ├ö┬ú├á (FIX CRÔö£├¼TICO) ATALHO POS-CHECKOUT agora DENTRO do run() (resolve "await is only valid in async functions")
+-// ├ö┬ú├á (FIX AGORA) Router "preÔö£┬║o/valor/quanto custa" => OFERTA antes do nudge/abertura
+-// ├ö┬ú├á (FIX AGORA) Anti-loop do nudge genÔö£┬«rico ganha do fluxo (nudge detectado + alternativa + flag persistida)
+-// ├ö┬ú├á (FIX) CorreÔö£┬║Ôö£├║o de shape: campos checkout string/nullable nÔö£├║o forÔö£┬║am typeof "string" quando null
+-// ├ö┬ú├á (FIX) buildClassifierKey nÔö£├║o usa customer_phone (evita inconsistÔö£┬¼ncia)
+-// ├ö┬ú├á (FIX AGORA) llm_class_last_key centralizado: Ôö£Ôòænica escrita via helper setCheckoutClassKeySafe()
++// ? Retorna { type, text, facts } para o core persistir facts_json
++// ? Normaliza fatos antigos (closing/payment/shipping) para n?o competir com checkout
++// ? Fix do loop: no m?ximo 1 awaiting_* ativo + reset ao "quero comprar" e ao concluir checkout
++// ? Finaliza??o: salva last_order e limpa pend?ncias corretamente
++// ? Aplica Treino Humano nas mensagens do funil sem quebrar l?gica
++// ? Usa loader oficial getEffectiveTraining() (fallback + contrato ?nico)
++// ? Integra LLM real (src/core/agentLLM.js) fora do checkout, com stageContext + facts + training
++// ? FIX: LLM n?o fica bloqueado ap?s co.sent=true
++// ? Logs: LLM CHECK + ENTER LLM + ENTER CHECKOUT + LLM DECISION
++// ? Normaliza??o robusta p/ gatilhos (remove acentos + lida com "?" / mojibake)
++// ? Fallback espec?fico para 429/quota
++// ? LLM h?brido dentro do checkout: responde obje??o e volta pra pergunta pendente (sem quebrar estado)
++// ? Anti-loop: evita usar LLM 2x para o mesmo inbound durante checkout
++// ? Stage Sync: mant?m customers.stage consistente com facts.stage
++// ? Classificador LLM em JSON no checkout (objection|checkout_data|other) + anti-loop pr?prio
++// ? HARD RULE no classificador (pending manda; heur?stica forte bypass; field != pending ignora)
++// ? (PASSO 5.5) BYPASS product_intelligence fora do checkout, antes do LLM
++// ? (FIX) Playbook Pitch ABERTURA + DIAGNOSTICO (antes do LLM) com anti-spam (facts_json)
++// ? (FIX CR?TICO) Normaliza??o de product_key: sempre usa DEFAULT (caps) como padr?o e normaliza case
++// ? (FIX CR?TICO) Debug PLAYBOOK INFO para enxergar product_key real + pitch_by_stage carregado
++// ? (FIX CR?TICO) Preserva facts.pitches_sent e demais campos ao aplicar defaults (n?o ?zera?)
++// ? (FIX CR?TICO) Fallback "oi" n?o repete exatamente a ABERTURA quando pitches_sent.abertura=true
++// ? (FIX CR?TICO) Persist?ncia: respond() pode persistir facts_json em modo AUTO (evita perder anti-spam)
++// ? (FIX CR?TICO) ATALHO POS-CHECKOUT agora DENTRO do run() (resolve "await is only valid in async functions")
++// ? (FIX AGORA) Router "pre?o/valor/quanto custa" => OFERTA antes do nudge/abertura
++// ? (FIX AGORA) Anti-loop do nudge gen?rico ganha do fluxo (nudge detectado + alternativa + flag persistida)
++// ? (FIX) Corre??o de shape: campos checkout string/nullable n?o for?am typeof "string" quando null
++// ? (FIX) buildClassifierKey n?o usa customer_phone (evita inconsist?ncia)
++// ? (FIX AGORA) llm_class_last_key centralizado: ?nica escrita via helper setCheckoutClassKeySafe()
++// ? (NOVO) maybeSyncStageToDB registra transi??o em facts.metrics.stage_flow
+ 
+ console.log("### LOADED services/agent.js ###", __filename);
+ 
+-console.log("### LOADED services/agent.js ###");
+-
+ const db = require("../config/db");
+ const { getEffectiveTraining } = require("./humanTrainingService");
+ const { generateLLMResponse } = require("../src/core/agentLLM");
++const metrics = require("./metricsService");
++const { analyzeIntent } = require("./intentEngine");
+ 
+ /* ======================
+    Utils
+@@ -57,19 +58,18 @@ function normalizeText(t) {
+ }
+ 
+ /**
+- * Normaliza para match/heurÔö£┬ísticas:
++ * Normaliza para match/heur?sticas:
+  * - lower
+  * - remove acentos
+- * - remove mojibake "┬┤ÔöÉ┬ó" (U+FFFD) para nÔö£├║o travar gatilhos
+- * - compacta espaÔö£┬║os
++ * - remove mojibake "?" (U+FFFD) para n?o travar gatilhos
++ * - compacta espa?os
+  */
+ function normalizeForMatch(input) {
+   let s = normalizeText(input);
+ 
+-  // ├ö┬ú├á FIX: remove caractere de substituiÔö£┬║Ôö£├║o "┬┤ÔöÉ┬ó" (mojibake)
+-  // Ex: "t┬┤ÔöÉ┬ó caro" -> "t caro"
+-  s = s.replace(/\uFFFD/g, " ");
+-  s = s.replace(/┬┤ÔöÉ┬ó/g, " ");
++// ? FIX: remove caractere de substitui??o "?" (mojibake)
++s = s.replace(/\uFFFD/g, " ");
++s = s.replace(/\?/g, " ");
+ 
+   // lower + remove acentos
+   s = s
+@@ -77,12 +77,72 @@ function normalizeForMatch(input) {
+     .normalize("NFD")
+     .replace(/[\u0300-\u036f]/g, "");
+ 
+-  // compacta espaÔö£┬║os
++  // compacta espa?os
+   s = s.replace(/\s+/g, " ").trim();
+-
+   return s;
+ }
+ 
++/**
++ * Decide se deve anexar pergunta pendente ap?s resposta h?brida,
++ * evitando duplicar o mesmo assunto.
++ */
++function shouldAppendPendingAfterHybrid(hybridText, pendingField) {
++  const t = normalizeForMatch(hybridText || "");
++
++  if (pendingField === "payment") {
++    if (t.includes("pix") || t.includes("cartao") || t.includes("cart?o") || t.includes("pagar")) return false;
++  }
++
++  if (pendingField === "channel") {
++    if (
++      t.includes("mercado livre") ||
++      t.includes("mercadolivre") ||
++      t.includes("amazon") ||
++      t.includes("shopee") ||
++      t.includes("site")
++    ) return false;
++  }
++
++  if (pendingField === "affiliate_link") {
++    if (t.includes("link") || t.includes("afiliad") || t.includes("indica") || t.includes("parceir")) return false;
++  }
++
++  if (pendingField === "cep") {
++    if (
++      t.includes("cep") ||
++      t.includes("endereco") ||
++      t.includes("endere?o") ||
++      t.includes("frete") ||
++      t.includes("prazo")
++    ) return false;
++  }
++
++  return true;
++}
++
++/**
++ * Vers?o curta contextual da pergunta pendente,
++ * usada apenas quando o h?brido roda.
++ */
++function getCheckoutPendingQuestionShort(pendingField) {
++  switch (pendingField) {
++    case "cep":
++      return "Pra eu seguir aqui, me manda seu *CEP*.";
++
++    case "payment":
++      return "Pra eu finalizar, voc├âãÆ├åÔÇÖ├âÔÇá├óÔé¼Ôäó├âãÆ├óÔé¼┬á├â┬ó├óÔÇÜ┬¼├óÔÇ×┬ó├âãÆ├åÔÇÖ├â┬ó├óÔÇÜ┬¼├é┬á├âãÆ├é┬ó├â┬ó├óÔé¼┼í├é┬¼├â┬ó├óÔé¼┼¥├é┬ó├âãÆ├åÔÇÖ├âÔÇá├óÔé¼Ôäó├âãÆ├é┬ó├â┬ó├óÔé¼┼í├é┬¼├âÔÇÜ├é┬á├âãÆ├åÔÇÖ├âÔÇÜ├é┬ó├âãÆ├é┬ó├â┬ó├óÔÇÜ┬¼├à┬í├âÔÇÜ├é┬¼├âãÆ├é┬ó├â┬ó├óÔÇÜ┬¼├à┬¥├âÔÇÜ├é┬ó├âãÆ├åÔÇÖ├âÔÇá├óÔé¼Ôäó├âãÆ├óÔé¼┬á├â┬ó├óÔÇÜ┬¼├óÔÇ×┬ó├âãÆ├åÔÇÖ├âÔÇÜ├é┬ó├âãÆ├é┬ó├â┬ó├óÔÇÜ┬¼├à┬í├âÔÇÜ├é┬¼├âãÆ├óÔé¼┬ª├âÔÇÜ├é┬í├âãÆ├åÔÇÖ├âÔÇá├óÔé¼Ôäó├âãÆ├é┬ó├â┬ó├óÔé¼┼í├é┬¼├âÔÇª├é┬í├âãÆ├åÔÇÖ├â┬ó├óÔÇÜ┬¼├à┬í├âãÆ├óÔé¼┼í├âÔÇÜ├é┬¬ prefere *PIX* ou *cart├âãÆ├åÔÇÖ├âÔÇá├óÔé¼Ôäó├âãÆ├óÔé¼┬á├â┬ó├óÔÇÜ┬¼├óÔÇ×┬ó├âãÆ├åÔÇÖ├â┬ó├óÔÇÜ┬¼├é┬á├âãÆ├é┬ó├â┬ó├óÔé¼┼í├é┬¼├â┬ó├óÔé¼┼¥├é┬ó├âãÆ├åÔÇÖ├âÔÇá├óÔé¼Ôäó├âãÆ├é┬ó├â┬ó├óÔé¼┼í├é┬¼├âÔÇÜ├é┬á├âãÆ├åÔÇÖ├âÔÇÜ├é┬ó├âãÆ├é┬ó├â┬ó├óÔÇÜ┬¼├à┬í├âÔÇÜ├é┬¼├âãÆ├é┬ó├â┬ó├óÔÇÜ┬¼├à┬¥├âÔÇÜ├é┬ó├âãÆ├åÔÇÖ├âÔÇá├óÔé¼Ôäó├âãÆ├óÔé¼┬á├â┬ó├óÔÇÜ┬¼├óÔÇ×┬ó├âãÆ├åÔÇÖ├âÔÇÜ├é┬ó├âãÆ├é┬ó├â┬ó├óÔÇÜ┬¼├à┬í├âÔÇÜ├é┬¼├âãÆ├óÔé¼┬ª├âÔÇÜ├é┬í├âãÆ├åÔÇÖ├âÔÇá├óÔé¼Ôäó├âãÆ├é┬ó├â┬ó├óÔé¼┼í├é┬¼├âÔÇª├é┬í├âãÆ├åÔÇÖ├â┬ó├óÔÇÜ┬¼├à┬í├âãÆ├óÔé¼┼í├âÔÇÜ├é┬úo*?";
++
++    case "channel":
++      return "S├âãÆ├åÔÇÖ├âÔÇá├óÔé¼Ôäó├âãÆ├óÔé¼┬á├â┬ó├óÔÇÜ┬¼├óÔÇ×┬ó├âãÆ├åÔÇÖ├â┬ó├óÔÇÜ┬¼├é┬á├âãÆ├é┬ó├â┬ó├óÔé¼┼í├é┬¼├â┬ó├óÔé¼┼¥├é┬ó├âãÆ├åÔÇÖ├âÔÇá├óÔé¼Ôäó├âãÆ├é┬ó├â┬ó├óÔé¼┼í├é┬¼├âÔÇÜ├é┬á├âãÆ├åÔÇÖ├âÔÇÜ├é┬ó├âãÆ├é┬ó├â┬ó├óÔÇÜ┬¼├à┬í├âÔÇÜ├é┬¼├âãÆ├é┬ó├â┬ó├óÔÇÜ┬¼├à┬¥├âÔÇÜ├é┬ó├âãÆ├åÔÇÖ├âÔÇá├óÔé¼Ôäó├âãÆ├óÔé¼┬á├â┬ó├óÔÇÜ┬¼├óÔÇ×┬ó├âãÆ├åÔÇÖ├âÔÇÜ├é┬ó├âãÆ├é┬ó├â┬ó├óÔÇÜ┬¼├à┬í├âÔÇÜ├é┬¼├âãÆ├óÔé¼┬ª├âÔÇÜ├é┬í├âãÆ├åÔÇÖ├âÔÇá├óÔé¼Ôäó├âãÆ├é┬ó├â┬ó├óÔé¼┼í├é┬¼├âÔÇª├é┬í├âãÆ├åÔÇÖ├â┬ó├óÔÇÜ┬¼├à┬í├âãÆ├óÔé¼┼í├âÔÇÜ├é┬│ pra eu fechar certinho: vai ser *Mercado Livre* ou *Amazon*?";
++
++    case "affiliate_link":
++      return "Me manda seu *link de afiliado* pra eu registrar certinho.";
++
++    default:
++      return null;
++  }
++}
++
+ function normalizeProductKey(pk) {
+   const s = normalizeText(pk);
+   if (!s) return "DEFAULT";
+@@ -109,7 +169,7 @@ function normalizeChannel(text) {
+   const t = normalizeForMatch(text);
+   if (t.includes("amazon")) return "amazon";
+   if (t.includes("mercado") || t.includes("ml")) return "mercado_livre";
+-  if (t.includes("oficial") || t.includes("loja")) return "loja_oficial";
++  if (t.includes("oficial") || t.includes("loja")) return "loja_oficial"; if (t.includes("whatsapp") || t === "zap" || t === "wpp" || t === "whats") return "whatsapp";
+   return null;
+ }
+ 
+@@ -139,36 +199,28 @@ function isPriceIntent(text) {
+   const patterns = [
+     "quanto custa",
+     "quanto e",
+-    "quanto Ôö£┬«",
++    "quanto ?",
+     "qual o preco",
+     "qual preco",
+     "qual o valor",
+     "qual valor",
+     "preco",
+     "valor",
+-    "preÔö£┬║o",
++    "pre?o",
+     "custa",
+-    "tÔö£├¡ quanto",
++    "t? quanto",
+     "ta quanto",
+   ];
+ 
+-  // patterns jÔö£├¡ estÔö£├║o "limpos" via normalizeForMatch na comparaÔö£┬║Ôö£├║o
+   if (patterns.some((p) => t.includes(normalizeForMatch(p)))) return true;
+-  if (t.startsWith("quanto") && (t.includes("custa") || t.includes("e") || t.includes("Ôö£┬«"))) return true;
++  if (t.startsWith("quanto") && (t.includes("custa") || t.includes("e") || t.includes("?"))) return true;
+   return false;
+ }
+ 
+-function isPingLike(text) {
+-  const inboundNorm = normalizeText(text);
+-  const inboundNormMatch = normalizeForMatch(inboundNorm);
+-  return (
+-    !inboundNorm ||
+-    inboundNorm.length <= 3 ||
+-    ["oi", "ola", "olÔö£├¡", "ok", "blz", "bom dia", "boa tarde", "boa noite"].includes(inboundNormMatch)
+-  );
+-}
++function isPingLike(text) { const t = normalizeForMatch(text); if (!t) return false; if (t.length > 20) return false; return ( t === "oi" || t === "ola" || t === "ol├í" || t === "opa" || t === "e ai" || t === "e a├¡" || t === "bom dia" || t === "boa tarde" || t === "boa noite" ); }
++
+ /* ======================
+-   Facts defaults / shape (FIX CRÔö£├¼TICO)
++   Facts defaults / shape (FIX CR?TICO)
+ ====================== */
+ function ensureFactsShape(facts) {
+   const f = facts && typeof facts === "object" ? facts : {};
+@@ -186,7 +238,11 @@ function ensureFactsShape(facts) {
+   if (typeof co.sent !== "boolean") co.sent = false;
+   if (typeof co.missing !== "boolean") co.missing = false;
+ 
+-  // ├ö┬ú├á nullable strings (null Ôö£┬« permitido)
++  // ? NOVO: Cooldown do h?brido
++  co.last_hybrid_at = Number(co.last_hybrid_at || 0);
++  co.last_hybrid_inbound_key = String(co.last_hybrid_inbound_key || "");
++
++  // ? nullable strings (null ? permitido)
+   if (co.cep == null) co.cep = null;
+   if (co.payment == null) co.payment = null;
+   if (co.channel == null) co.channel = null;
+@@ -195,7 +251,7 @@ function ensureFactsShape(facts) {
+   if (co.checkout_url == null) co.checkout_url = null;
+   if (co.sent_at == null) co.sent_at = null;
+ 
+-  // anti-loop (nÔö£├║o apagar)
++  // anti-loop
+   if (co.llm_last_inbound_key == null) co.llm_last_inbound_key = null;
+   if (co.llm_class_last_key == null) co.llm_class_last_key = null;
+   if (co.pending_question_last_inbound_key == null) co.pending_question_last_inbound_key = null;
+@@ -211,7 +267,7 @@ function ensureFactsShape(facts) {
+ }
+ 
+ /**
+- * ├ö┬ú├á Aplica defaults SEM apagar campos existentes (principalmente pitches_sent).
++ * ? Aplica defaults SEM apagar campos existentes (principalmente pitches_sent).
+  */
+ function ensureFactsDefaults(facts, customer) {
+   const f = ensureFactsShape(facts);
+@@ -238,6 +294,9 @@ function ensureFactsDefaults(facts, customer) {
+     llm_class_last_key: null,
+     pending_question_last_inbound_key: null,
+ 
++    last_hybrid_at: 0,
++    last_hybrid_inbound_key: "",
++
+     ...(f.checkout || {}),
+   };
+ 
+@@ -249,6 +308,14 @@ function ensureFactsDefaults(facts, customer) {
+     ...(f.llm || {}),
+   };
+ 
++  // ======================
++  // Metrics (objections, etc.)
++  // ======================
++  f.metrics = (f.metrics && typeof f.metrics === "object") ? f.metrics : {};
++  f.metrics.objections_total = Number.isFinite(f.metrics.objections_total) ? f.metrics.objections_total : 0;
++  f.metrics.objections_by_type =
++    (f.metrics.objections_by_type && typeof f.metrics.objections_by_type === "object") ? f.metrics.objections_by_type : {};
++
+   return f;
+ }
+ 
+@@ -297,6 +364,9 @@ function resetCheckoutState(facts) {
+   facts.checkout.llm_class_last_key = null;
+   facts.checkout.pending_question_last_inbound_key = null;
+ 
++  facts.checkout.last_hybrid_at = 0;
++  facts.checkout.last_hybrid_inbound_key = "";
++
+   facts.stage = "checkout_start";
+   facts.last_reset_at = new Date().toISOString();
+ 
+@@ -322,6 +392,9 @@ function normalizeFactsForCheckout(facts) {
+   if (!("llm_class_last_key" in facts.checkout)) facts.checkout.llm_class_last_key = null;
+   if (!("pending_question_last_inbound_key" in facts.checkout)) facts.checkout.pending_question_last_inbound_key = null;
+ 
++  if (!("last_hybrid_at" in facts.checkout)) facts.checkout.last_hybrid_at = 0;
++  if (!("last_hybrid_inbound_key" in facts.checkout)) facts.checkout.last_hybrid_inbound_key = "";
++
+   enforceSingleAwaiting(facts.checkout);
+   return facts;
+ }
+@@ -352,11 +425,13 @@ function normalizePitchByStage({ pitch_by_stage_raw, data_json }) {
+   const pitch_by_stage = { ...(pitch_by_stage_raw || {}) };
+ 
+   if (!pitch_by_stage.abertura && data_json?.pitch_abertura) pitch_by_stage.abertura = String(data_json.pitch_abertura).trim();
+-  if (!pitch_by_stage.diagnostico && data_json?.pitch_diagnostico)
++  if (!pitch_by_stage.diagnostico && data_json?.pitch_diagnostico) {
+     pitch_by_stage.diagnostico = String(data_json.pitch_diagnostico).trim();
++  }
+   if (!pitch_by_stage.oferta && data_json?.pitch_oferta) pitch_by_stage.oferta = String(data_json.pitch_oferta).trim();
+-  if (!pitch_by_stage.fechamento && data_json?.pitch_fechamento)
++  if (!pitch_by_stage.fechamento && data_json?.pitch_fechamento) {
+     pitch_by_stage.fechamento = String(data_json.pitch_fechamento).trim();
++  }
+ 
+   return pitch_by_stage;
+ }
+@@ -480,6 +555,146 @@ async function getPlaybookRowWithFallback({ tenant_id, product_key }) {
+   };
+ }
+ 
++/* ======================
++   Intent response helpers
++====================== */
++function normalizeTextLite(s = "") {
++  return String(s || "")
++    .replace(/\s+/g, " ")
++    .trim();
++}
++
++function appendIfMissing(baseText, extraText) {
++  const base = normalizeTextLite(baseText);
++  const extra = normalizeTextLite(extraText);
++
++  if (!extra) return base;
++  if (!base) return extra;
++
++  const baseLower = base.toLowerCase();
++  const extraLower = extra.toLowerCase();
++
++  if (baseLower.includes(extraLower)) return base;
++  return `${base} ${extra}`.trim();
++}
++
++function applyIntentSignalsToReply({ text, facts, stage }) {
++  let finalText = normalizeTextLite(text);
++  if (!finalText) return finalText;
++
++  const intent = facts?.metrics?.intent_signals || {};
++  const nextBestAction = String(intent?.next_best_action || "").trim().toLowerCase();
++  const buyingTemperature = String(intent?.buying_temperature || "").trim().toLowerCase();
++  const objectionType = String(intent?.objection_type || "").trim().toLowerCase();
++  const purchaseIntent = String(intent?.purchase_intent || "").trim().toLowerCase();
++  const currentStage = String(stage || facts?.stage || "").trim().toLowerCase();
++
++  if (!nextBestAction) return finalText;
++
++  switch (nextBestAction) {
++    case "close": {
++      if (!/\?/.test(finalText)) {
++        finalText = appendIfMissing(
++          finalText,
++          "A├¡ eu j├í sigo com o c├ílculo e te explico os pr├│ximos passos."
++        );
++      } else {
++        finalText = appendIfMissing(
++          finalText,
++          "Se quiser, j├í seguimos para o pr├│ximo passo."
++        );
++      }
++
++      if (
++        buyingTemperature === "hot" ||
++        purchaseIntent === "high" ||
++        currentStage === "checkout_payment" ||
++        currentStage === "checkout_channel" ||
++        currentStage === "checkout_link"
++      ) {
++        finalText = appendIfMissing(
++          finalText,
++          ""
++        );
++      }
++      break;
++    }
++
++    case "handle_objection": {
++      let objectionLine = "Entendo sua preocupa??o.";
++
++      if (objectionType === "price") {
++        objectionLine = "Entendo sua preocupa??o com o valor.";
++      } else if (objectionType === "trust") {
++        objectionLine = "Entendo sua preocupa??o com confian?a e seguran?a.";
++      } else if (objectionType === "time") {
++        objectionLine = "Entendo sua preocupa??o com o momento certo.";
++      } else if (objectionType === "need") {
++        objectionLine = "Entendo sua d?vida se isso realmente faz sentido para voc?.";
++      }
++
++      if (!finalText.toLowerCase().includes(objectionLine.toLowerCase())) {
++        finalText = `${objectionLine} ${finalText}`.trim();
++      }
++
++      finalText = appendIfMissing(
++        finalText,
++        "Posso te explicar isso de forma bem objetiva, sem enrola??o."
++      );
++      break;
++    }
++
++    case "reassure": {
++      finalText = appendIfMissing(
++        finalText,
++        "A ideia aqui ? te passar clareza e seguran?a para decidir melhor."
++      );
++      break;
++    }
++
++    case "ask_question": {
++      if (!/\?/.test(finalText)) {
++        finalText = appendIfMissing(
++          finalText,
++          "O que mais pesa para voc? neste momento: pre?o, confian?a ou entender melhor como funciona?"
++        );
++      }
++      break;
++    }
++
++    case "inform": {
++      finalText = finalText.trim();
++      break;
++    }
++
++    default:
++      break;
++  }
++
++  return normalizeTextLite(finalText);
++}
++
++
++/* ?? COLE AQUI EMBAIXO ?? */
++
++function buildIntentAwareText(baseText, facts) {
++  try {
++    if (!baseText) return baseText;
++
++    const intentSignals = facts?.metrics?.intent_signals;
++    if (!intentSignals) return baseText;
++
++    return applyIntentSignalsToReply({
++      text: baseText,
++      facts,
++      stage: facts?.stage
++    });
++  } catch (e) {
++    console.error("?? [intent] buildIntentAwareText error:", e?.message || e);
++    return baseText;
++  }
++}
++
+ /* ======================
+    Policies / Rules / Objections
+ ====================== */
+@@ -487,6 +702,60 @@ function pickFirst(arr) {
+   return Array.isArray(arr) && arr.length ? arr[0] : null;
+ }
+ 
++function inferObjectionType(textRaw) {
++  const t = normalizeForMatch(textRaw || "");
++
++  // pre?o
++  if (t.includes("caro") || t.includes("preco") || t.includes("pre?o") || t.includes("valor") || t.includes("desconto") || t.includes("mais barato")) {
++    return "price";
++  }
++
++  // confian?a / golpe
++  if (t.includes("nao confio") || t.includes("n?o confio") || t.includes("golpe") || t.includes("reclame aqui") || t.includes("e seguro") || t.includes("? seguro")) {
++    return "trust";
++  }
++
++  // prazo / entrega
++  if (t.includes("demora") || t.includes("prazo") || t.includes("quando chega") || t.includes("frete caro") || t.includes("frete")) {
++    return "deadline";
++  }
++
++  // humano / suporte
++  if (t.includes("humano") || t.includes("atendente") || t.includes("suporte")) {
++    return "human";
++  }
++
++  // desist?ncia / abandono
++  if (t.includes("vou pensar") || t.includes("desisti") || t.includes("nao quero") || t.includes("n?o quero")) {
++    return "drop";
++  }
++
++  return "other";
++}
++
++function bumpObjectionMetric(facts, type, ctx = {}) {
++  if (!facts) return;
++
++  facts.metrics = (facts.metrics && typeof facts.metrics === "object") ? facts.metrics : {};
++  facts.metrics.objections_total = Number.isFinite(facts.metrics.objections_total) ? (facts.metrics.objections_total + 1) : 1;
++
++  facts.metrics.objections_by_type =
++    (facts.metrics.objections_by_type && typeof facts.metrics.objections_by_type === "object") ? facts.metrics.objections_by_type : {};
++
++  const key = String(type || "unknown");
++  facts.metrics.objections_by_type[key] = (facts.metrics.objections_by_type[key] || 0) + 1;
++
++  facts.metrics.last_objection = {
++    type: key,
++    stage: ctx.stage || facts.stage || null,
++    pendingField: ctx.pendingField || null,
++    inboundId: ctx.inboundId || null,
++    at: new Date().toISOString(),
++  };
++
++  facts._dirty = true;
++}
++
+ function detectObjection({ objections_json, inboundText, stage }) {
+   const t = normalizeForMatch(inboundText);
+   if (!objections_json || typeof objections_json !== "object") return null;
+@@ -498,7 +767,6 @@ function detectObjection({ objections_json, inboundText, stage }) {
+     if (!k) continue;
+     if (t.includes(k)) {
+       const answers = scoped[key];
+-      // compat: pode ser array/string/obj
+       const answer = Array.isArray(answers) ? pickFirst(answers) : answers;
+       return { key, answers, answer };
+     }
+@@ -514,7 +782,7 @@ function applyPolicies({ policies_json, textOut, facts }) {
+   for (const phrase of forbidden) {
+     const p = normalizeForMatch(phrase);
+     if (p && normalizeForMatch(out).includes(p)) {
+-      out = "Entendi. Vou te ajudar por aqui com as informaÔö£┬║Ôö£├ües certas. ┬¡ãÆ├û├®";
++      out = "Entendi. Vou te ajudar por aqui com as informa??es certas. ??";
+       break;
+     }
+   }
+@@ -542,12 +810,10 @@ async function applyPlaybook({ playbook, inboundText, facts, applyTrainingToOutg
+   if (!playbook) return { handled: false, text: null, facts };
+ 
+   const stage = facts?.stage || "abertura";
+-
+   ({ facts } = applyRules({ rules_json: playbook.rules_json, facts }));
+ 
+   const obj = detectObjection({ objections_json: playbook.objections_json, inboundText, stage });
+-  if (obj) {
+-    // resolve "chosen" compat
++  if (obj && false) {
+     let chosen = "";
+     if (Array.isArray(obj?.answers) && obj.answers.length) chosen = String(pickFirst(obj.answers) || "").trim();
+     else if (typeof obj?.answers === "string" && obj.answers.trim()) chosen = obj.answers.trim();
+@@ -564,6 +830,8 @@ async function applyPlaybook({ playbook, inboundText, facts, applyTrainingToOutg
+       let textOut = chosen;
+       if (typeof applyTrainingToOutgoing === "function") {
+         textOut = applyTrainingToOutgoing(textOut, humanTraining, `playbook_objection_${obj.key}`);
++        const leadSignal = detectLeadSignal(inboundText);
++        textOut = applyLeadSignalToReply(textOut, leadSignal, humanTraining, stage);
+       }
+       ({ textOut, facts } = applyPolicies({ policies_json: playbook.policies_json, textOut, facts }));
+       facts._dirty = true;
+@@ -576,6 +844,8 @@ async function applyPlaybook({ playbook, inboundText, facts, applyTrainingToOutg
+     let textOut = pitch;
+     if (typeof applyTrainingToOutgoing === "function") {
+       textOut = applyTrainingToOutgoing(textOut, humanTraining, `playbook_pitch_${stage}`);
++      const leadSignal = detectLeadSignal(inboundText);
++      textOut = applyLeadSignalToReply(textOut, leadSignal, humanTraining, stage);
+     }
+     ({ textOut, facts } = applyPolicies({ policies_json: playbook.policies_json, textOut, facts }));
+     facts._dirty = true;
+@@ -601,11 +871,11 @@ async function getCheckoutUrl({ tenant_id, product_key, channel }) {
+    Training formatting
+ ====================== */
+ function textHasEmoji(t) {
+-  return /[┬¡ãÆ├┐├¿┬¡ãÆ├û├®├ö┬ú├á┬¡ãÆ├Â├æ┬¡ãÆ├ª├½├ö├ù├¡┬┤┬®├à]/.test(t);
++  return /[???????????]/.test(t);
+ }
+ function removeKnownEmojis(t) {
+   return String(t ?? "")
+-    .replace(/[┬¡ãÆ├┐├¿┬¡ãÆ├û├®├ö┬ú├á┬¡ãÆ├Â├æ┬¡ãÆ├ª├½├ö├ù├¡┬┤┬®├à]/g, "")
++    .replace(/[???????????]/g, "")
+     .replace(/\s{2,}/g, " ")
+     .trim();
+ }
+@@ -627,89 +897,270 @@ function isMoreDirectPressure(pressureLevel) {
+   return s.includes("alta") || s.includes("agressiv") || s.includes("forte");
+ }
+ 
++
++function detectLeadSignal(text = "") {
++  const s = normalizeForMatch(text);
++
++  const interestPatterns = [
++    /\bquero\b/, /\btenho interesse\b/, /\bgostei\b/, /\bcurti\b/, /\bmanda\b/, /\benvia\b/,
++    /\bcomo faco\b/, /\bcomo fa├ºo\b/, /\bqual valor\b/, /\bqual o valor\b/, /\bpreco\b/, /\bpre├ºo\b/,
++    /\bparcela\b/, /\bparcelado\b/, /\bpix\b/, /\bcartao\b/, /\bcart├úo\b/, /\bfechar\b/, /\bcomprar\b/
++  ];
++
++  const doubtPatterns = [
++    /\bcomo funciona\b/, /\bfunciona mesmo\b/, /\bcomo eh\b/, /\bcomo ├®\b/, /\bexplica\b/,
++    /\bnao entendi\b/, /\bn├úo entendi\b/, /\bqual a diferenca\b/, /\bqual a diferen├ºa\b/,
++    /\btem garantia\b/, /\bserve pra mim\b/, /\bsera\b/, /\bser├í\b/, /\bduvida\b/, /\bd├║vida\b/
++  ];
++
++  const resistancePatterns = [
++    /\bcaro\b/, /\best[a├í] caro\b/, /\bmuito caro\b/, /\bnao confio\b/, /\bn├úo confio\b/,
++    /\bdepois eu vejo\b/, /\bagora nao\b/, /\bagora n├úo\b/, /\bvou pensar\b/, /\bnao sei\b/,
++    /\bn├úo sei\b/, /\btenho medo\b/, /\bcomplicado\b/, /\bdificil\b/, /\bdif├¡cil\b/
++  ];
++
++  const disinterestPatterns = [
++    /\bnao quero\b/, /\bn├úo quero\b/, /\bsem interesse\b/, /\bnao tenho interesse\b/, /\bn├úo tenho interesse\b/,
++    /\bdeixa\b/, /\bde boa\b/, /\bto sem tempo\b/, /\bestou sem tempo\b/, /\bparar\b/, /\bcancelar\b/
++  ];
++
++  if (disinterestPatterns.some((rx) => rx.test(s))) return "disinterest";
++  if (resistancePatterns.some((rx) => rx.test(s))) return "resistance";
++  if (doubtPatterns.some((rx) => rx.test(s))) return "doubt";
++  if (interestPatterns.some((rx) => rx.test(s))) return "interest";
++  return "neutral";
++}
++
++function applyLeadSignalToReply(text, leadSignal = "neutral", ht = {}, stage = "") {
++  let out = String(text ?? "").trim();
++  const informal = isInformalLanguage(ht.language_level, ht.tone_style);
++
++  function hasQuestion(s) {
++    return /\?/.test(String(s ?? ""));
++  }
++
++  function appendIfMissing(base, addition) {
++    const b = String(base ?? "").trim();
++    const a = String(addition ?? "").trim();
++    if (!a) return b;
++    
++    return (b + " " + a).replace(/\s{2,}/g, " ").trim();
++  }
++
++  function prependIfMissing(base, addition) {
++    const b = String(base ?? "").trim();
++    const a = String(addition ?? "").trim();
++    if (!a) return b;
++    
++    return (a + " " + b).replace(/\s{2,}/g, " ").trim();
++  }
++
++  if (leadSignal === "doubt") {
++    out = prependIfMissing(out, informal ? "Boa pergunta." : "├ôtima pergunta.");
++  }
++
++  if (leadSignal === "resistance") {
++    out = prependIfMissing(out, informal ? "Entendo teu ponto." : "Entendo seu ponto.");
++    out = appendIfMissing(out, "Mas deixa eu te mostrar um detalhe que pode mudar isso pra voc├¬.");
++    if (!hasQuestion(out)) {
++      out = appendIfMissing(out, "Quer que eu te explique rapidinho?");
++    }
++  }
++
++  if (leadSignal === "interest") {
++    if (!hasQuestion(out) && !/send_final/i.test(stage)) {
++      out = appendIfMissing(out, "Quer que eu j├í te passe o pr├│ximo passo?");
++    }
++  }
++
++  if (leadSignal === "disinterest") {
++    out = prependIfMissing(out, informal ? "Tranquilo." : "Sem problema.");
++  }
++
++  return out.replace(/\s{2,}/g, " ").trim();
++}
+ function applyTrainingToOutgoing(text, ht = {}, stage = "") {
+-  let out = String(text ?? "");
++  let out = String(text ?? "").trim();
++
++  function hasQuestion(s) {
++    return /\?/.test(String(s ?? ""));
++  }
++
++  function appendIfMissing(base, addition) {
++    const b = String(base ?? "").trim();
++    const a = String(addition ?? "").trim();
++    if (!a) return b;
++    
++    return (b + " " + a).replace(/\s{2,}/g, " ").trim();
++  }
++
++  function prependIfMissing(base, addition) {
++    const b = String(base ?? "").trim();
++    const a = String(addition ?? "").trim();
++    if (!a) return b;
++    
++    return (a + " " + b).replace(/\s{2,}/g, " ").trim();
++  }
+ 
+   if (isNoEmojiPolicy(ht.emoji_usage)) out = removeKnownEmojis(out);
+   else if (isHighEmojiPolicy(ht.emoji_usage)) {
+-    if (!textHasEmoji(out)) out = out + " ┬¡ãÆ├û├®";
++    if (!textHasEmoji(out)) out = out + " ­ƒÖé";
+   }
+ 
+   const energy = normalizeForMatch(ht.energy);
+-  if (energy.includes("baixa")) out = out.replace(/!{2,}/g, "!").replace(/┬¡ãÆ├┐├¿|┬¡ãÆ├û├®/g, "").trim();
++  if (energy.includes("baixa")) {
++    out = out.replace(/!{2,}/g, "!").replace(/\?{2,}/g, "?").trim();
++  } else if (energy.includes("alta")) {
++    out = out.replace(/\.\s*$/, "!");
++  }
++
++  if (isMoreDirectPressure(ht.pressure_level)) {
++    out = out.replace(/\s*\n\s*\n/g, "\n").trim();
++  }
++
++  const informal = isInformalLanguage(ht.language_level, ht.tone_style);
++
++  if (informal) {
++    out = out
++      .replace(/\bPerfeito!\b/g, "Perfeito!")
++      .replace(/\bCerto,\s*me informe\b/gi, "Me passa")
++      .replace(/\bPor favor,\s*me informe\b/gi, "Me passa");
++  }
++
++  if (/^playbook_objection_/i.test(stage)) {
++    out = prependIfMissing(out, informal ? "Entendo teu ponto." : "Entendo seu ponto.");
++    if (!hasQuestion(out)) {
++      out = appendIfMissing(out, informal ? "Quer que eu te mostre a forma mais simples?" : "Quer que eu te mostre a forma mais simples?");
++    }
++  }
++
++  if (/^playbook_pitch_/i.test(stage) || stage === "llm") {
++    if (!hasQuestion(out)) {
++      out = appendIfMissing(
++        out,
++        informal ? "Faz sentido pra voc├¬?" : "Faz sentido pra voc├¬?"
++      );
++    }
++  }
++
++  if (stage === "ask_payment") {
++    out = out.replace(/\bPIX\* ou no \*cart├úo\*/i, "*PIX* ou no *cart├úo*");
++  }
++
++  if (stage === "ask_cep") {
++    out = prependIfMissing(out, informal ? "Fechou." : "Perfeito.");
++  }
+ 
+-  if (isMoreDirectPressure(ht.pressure_level)) out = out.replace(/\s*\n\s*\n/g, "\n").trim();
++  if (stage === "invalid") {
++    out = prependIfMissing(out, informal ? "Sem problema." : "Sem problema.");
++  }
+ 
+-  if (stage === "send_final") {
+-    const tail = "Se precisar, eu te ajudo por aqui.";
+-    if (!out.toLowerCase().includes("se precisar")) out = out + "\n\n" + tail;
++  if (stage === "send_final_link" || stage === "send_final") {
++    const tail = informal
++      ? "Se precisar, eu sigo te ajudando por aqui."
++      : "Se precisar, eu sigo te ajudando por aqui.";
++    if (!out.toLowerCase().includes("se precisar")) {
++      out = out + "\n\n" + tail;
++    }
+   }
+ 
++  out = out
++    .replace(/\s{2,}/g, " ")
++    .replace(/\n{3,}/g, "\n\n")
++    .trim();
++
+   return out;
+ }
+ 
+ /* ======================
+    Copy (mensagens)
+ ====================== */
+-function humanAskCep(ht) {
++function humanAskCep(ht, facts) {
+   const informal = isInformalLanguage(ht.language_level, ht.tone_style);
+   const msg = informal
+-    ? "Fechou! Me passa teu *CEP* (ex: 01001-000) pra eu ver o prazo ┬¡ãÆ├û├®"
+-    : "Perfeito! ┬¡ãÆ├┐├¿ Me passa seu *CEP* (ex: 01001-000) pra calcular o prazo.";
+-  return applyTrainingToOutgoing(msg, ht, "ask_cep");
++    ? "Fechou! Me passa teu *CEP* (ex: 01001-000) pra eu calcular o prazo."
++    : "Me passa seu *CEP* (ex: 01001-000) pra calcular o prazo.";
++
++  const trained = applyTrainingToOutgoing(msg, ht, "ask_cep");
+ }
+-function humanAskPayment(ht) {
++function humanAskPayment(ht, facts) {
+   const informal = isInformalLanguage(ht.language_level, ht.tone_style);
+-  const msg = informal ? "Boa! Vai pagar no *PIX* ou no *cartÔö£├║o*? ┬¡ãÆ├û├®" : "Show! VocÔö£┬¼ prefere pagar no *PIX* ou *cartÔö£├║o*? ┬¡ãÆ├û├®";
+-  return applyTrainingToOutgoing(msg, ht, "ask_payment");
++
++  const base = informal
++    ? "Boa! Vai pagar no *PIX* ou no *cart\u00E3o*?"
++    : "Show! Voc\u00EA prefere pagar no *PIX* ou *cart\u00E3o*?";
++
++  const trained = applyTrainingToOutgoing(base, ht, "ask_payment");
++
+ }
+-function humanAskChannel(ht) {
+-  const informal = isInformalLanguage(ht.language_level, ht.tone_style);
+-  const msg = informal ? "Qual canal vocÔö£┬¼ quer? *Amazon* / *Mercado Livre* / *Loja oficial*" : "Confirma o canal: *Amazon* / *Mercado Livre* / *Loja oficial*?";
+-  return applyTrainingToOutgoing(msg, ht, "ask_channel");
++function humanAskChannel(ht, facts) {
++  const base = "Perfeito! Agora me diz por onde voc\u00EA prefere receber o link. Pode ser WhatsApp, email ou outro canal.";
++
++  const trained = applyTrainingToOutgoing(base, ht);
++
+ }
+-function humanAskAffiliateLink(channel, ht) {
+-  const label = channel === "amazon" ? "Amazon" : channel === "mercado_livre" ? "Mercado Livre" : "Loja oficial";
+-  const informal = isInformalLanguage(ht.language_level, ht.tone_style);
+-  const msg = informal
+-    ? `Show ├ö┬ú├á Canal: *${label}*. Agora me manda teu link do produto (afiliado) pra eu te passar o final aqui ┬¡ãÆ├û├®`
+-    : `Perfeito ├ö┬ú├á Canal escolhido: *${label}*. Agora me manda o link do produto (seu link de afiliado) pra eu te entregar aqui e finalizar ┬¡ãÆ├û├®`;
+-  return applyTrainingToOutgoing(msg, ht, "ask_affiliate");
++function humanAskAffiliateLink(channel, ht, facts) {
++  const channelLabel =
++    channel === "amazon"
++      ? "Amazon"
++      : channel === "mercado_livre"
++      ? "Mercado Livre"
++      : channel === "loja_oficial"
++      ? "Loja oficial"
++      : "esse canal";
++
++  const base = `Perfeito! Canal escolhido: *${channelLabel}*. Agora me manda o link do produto (seu link de afiliado) pra eu te entregar aqui e finalizar.`;
++
++  const trained = applyTrainingToOutgoing(base, ht, "ask_affiliate_link");
++
+ }
+-function humanSendFinalLink(url, ht) {
+-  const informal = isInformalLanguage(ht.language_level, ht.tone_style);
+-  const direct = isMoreDirectPressure(ht.pressure_level);
++function humanSendFinalLink(url, ht, facts) {
++  const base = `Perfeito! Agora ├® s├│ finalizar por aqui: ${url}`;
+ 
+-  let msg;
+-  if (direct) msg = `Link pra finalizar: ${url}`;
+-  else if (informal) msg = `Pronto ├ö┬ú├á Finaliza por aqui: ${url}`;
+-  else msg = `Perfeito ├ö┬ú├á Finalize por aqui: ${url}`;
++  const trained = applyTrainingToOutgoing(base, ht, "send_final_link");
+ 
+-  return applyTrainingToOutgoing(msg, ht, "send_final");
+ }
+-function humanInvalidCep(ht) {
++function humanInvalidCep(ht, facts) {
+   const informal = isInformalLanguage(ht.language_level, ht.tone_style);
+-  const msg = informal ? "Me manda o CEP assim: *01001-000* ┬¡ãÆ├û├®" : "Me manda seu CEP nesse formato: *01001-000* ┬¡ãÆ├û├®";
+-  return applyTrainingToOutgoing(msg, ht, "invalid");
++
++  const base = informal
++    ? "Me manda o CEP nesse formato aqui: *01001-000*"
++    : "Por favor, me informe o CEP nesse formato: *01001-000*";
++
++  const trained = applyTrainingToOutgoing(base, ht, "invalid");
++
+ }
+-function humanInvalidPayment(ht) {
+-  const msg = "SÔö£Ôöé pra eu seguir: vocÔö£┬¼ prefere *PIX* ou *cartÔö£├║o*? ┬¡ãÆ├û├®";
+-  return applyTrainingToOutgoing(msg, ht, "invalid");
++function humanInvalidPayment(ht, facts) {
++  const base = "S\u00F3 pra eu continuar: voc\u00EA prefere *PIX* ou *cart\u00E3o*?";
++
++  const trained = applyTrainingToOutgoing(base, ht, "invalid");
++
+ }
+-function humanInvalidAffiliateLink(ht) {
+-  const msg = "Me manda o *link completo* (comeÔö£┬║ando com http/https) pra eu finalizar ┬¡ãÆ├û├®";
+-  return applyTrainingToOutgoing(msg, ht, "invalid");
++function humanInvalidAffiliateLink(ht, facts) {
++  const base = "Me manda o *link completo* (come\u00E7ando com http ou https) pra eu finalizar pra voc\u00EA."; 
++
++  const trained = applyTrainingToOutgoing(base, ht, "invalid");
++
+ }
+ function humanLLMQuotaFallback(ht) {
+-  const msg = "Entendi. ┬¡ãÆ├û├® Quer que eu te passe a opÔö£┬║Ôö£├║o mais em conta ou prefere que eu te explique o custo-benefÔö£┬ício rapidinho?";
++  const msg = "Entendi. ?? Quer que eu te passe a op??o mais em conta ou prefere que eu te explique o custo-benef?cio rapidinho?";
+   return applyTrainingToOutgoing(msg, ht, "fallback_llm_429");
+ }
+ 
+ /* ======================
+-   HeurÔö£┬ística: quando chamar o LLM fora do checkout
++   Heur?stica: quando chamar o LLM fora do checkout
+ ====================== */
+ function shouldUseLLMOutsideCheckout(text) {
+   const t = normalizeForMatch(text);
++  console.log("[agent] shouldUseLLMOutsideCheckout DEBUG", {
++    raw: text,
++    normalized: t,
++    includes_tentei: t.includes("tentei"),
++    includes_funcionou: t.includes("funcionou"),
++    decision_preview:
++      (t.includes("tentei") || t.includes("usei") || t.includes("fiz")) &&
++      (t.includes("funcionou") || t.includes("resultado") || t.includes("resolveu") || t.includes("adiantou"))
++  });
+   if (!t) return false;
+ 
+   const keywords = [
+@@ -728,7 +1179,7 @@ function shouldUseLLMOutsideCheckout(text) {
+     "tem nota",
+     "qual diferenca",
+     "diferenca",
+-    "diferenciais",
++    "diferenciais", "diferenca", "diferenca",
+     "me explica",
+     "explica",
+     "me fala",
+@@ -740,6 +1191,12 @@ function shouldUseLLMOutsideCheckout(text) {
+   ];
+ 
+   if (keywords.some((k) => t.includes(k))) return true;
++
++  const frustrationHint =
++    (t.includes("tentei") || t.includes("usei") || t.includes("fiz")) &&
++    (t.includes("funcionou") || t.includes("resultado") || t.includes("resolveu") || t.includes("adiantou"));
++
++  if (frustrationHint) return true;
+   if (t.endsWith("?")) return true;
+ 
+   const starts = ["porque", "pq", "como", "qual", "quais", "quanto", "onde", "quando", "o que"];
+@@ -749,7 +1206,7 @@ function shouldUseLLMOutsideCheckout(text) {
+ }
+ 
+ /* ======================
+-   ├ö┬ú├á LLM hÔö£┬íbrido dentro do checkout (pergunta pendente)
++   ? LLM h?brido dentro do checkout (pergunta pendente)
+ ====================== */
+ function markPendingQuestionAppendedForInbound(facts, inboundKey) {
+   if (!facts) return;
+@@ -767,10 +1224,10 @@ function getCheckoutPendingQuestion(checkout, ht, channel, facts, inboundKey) {
+   if (!checkout) return null;
+   if (facts && inboundKey && alreadyAppendedPendingQuestionForThisInbound(facts, inboundKey)) return null;
+ 
+-  if (checkout.awaiting_cep) return humanAskCep(ht);
+-  if (checkout.awaiting_payment) return humanAskPayment(ht);
+-  if (checkout.awaiting_channel) return humanAskChannel(ht);
+-  if (checkout.awaiting_affiliate_link) return humanAskAffiliateLink(channel || checkout.channel, ht);
++  if (checkout.awaiting_cep) return humanAskCep(ht, facts);
++  if (checkout.awaiting_payment) return humanAskPayment(ht, facts);
++  if (checkout.awaiting_channel) return humanAskChannel(ht, facts);
++  if (checkout.awaiting_affiliate_link) return humanAskAffiliateLink(channel || checkout.channel, ht, facts);
+   return null;
+ }
+ 
+@@ -793,20 +1250,41 @@ function markLLMUsedForInbound(facts, inboundKey) {
+   facts._dirty = true;
+ }
+ 
++/**
++ * ? COOLDOWN DO H?BRIDO
++ */
++function shouldCooldownHybrid(facts, inboundKey, cooldownMs) {
++  const lastAt = Number(facts?.checkout?.last_hybrid_at || 0);
++  const lastKey = String(facts?.checkout?.last_hybrid_inbound_key || "");
++  const now = Date.now();
++
++  if (lastKey && inboundKey && lastKey === inboundKey) return true;
++  if (lastAt > 0 && now - lastAt < cooldownMs) return true;
++  return false;
++}
++
++function markHybridRun(facts, inboundKey) {
++  if (!facts) return;
++  if (!facts.checkout) facts.checkout = {};
++  facts.checkout.last_hybrid_at = Date.now();
++  facts.checkout.last_hybrid_inbound_key = String(inboundKey || "");
++  facts._dirty = true;
++}
++
+ function looksLikeObjection(textRaw) {
+   const t = normalizeForMatch(textRaw || "");
+   const patterns = [
+     "ta caro",
+-    "tÔö£├¡ caro",
++    "t? caro",
+     "caro",
+     "preco",
+-    "preÔö£┬║o",
++    "pre?o",
+     "valor",
+     "desconto",
+     "mais barato",
+     "frete caro",
+     "nao confio",
+-    "nÔö£├║o confio",
++    "n?o confio",
+     "golpe",
+     "reclame aqui",
+     "demora",
+@@ -814,7 +1292,7 @@ function looksLikeObjection(textRaw) {
+     "quando chega",
+     "vou pensar",
+     "desisti",
+-    "nÔö£├║o quero",
++    "n?o quero",
+     "nao quero",
+     "humano",
+     "atendente",
+@@ -824,7 +1302,7 @@ function looksLikeObjection(textRaw) {
+ }
+ 
+ /* ======================
+-   ├ö┬ú├á Classificador LLM no checkout (PASSO 4)
++   ? Classificador LLM no checkout (PASSO 4)
+ ====================== */
+ function getPendingFieldFromCheckout(co) {
+   if (!co) return null;
+@@ -836,7 +1314,7 @@ function getPendingFieldFromCheckout(co) {
+ }
+ 
+ function buildClassifierKey({ customer, facts, text, pendingField }) {
+-  const phone = customer?.phone || customer?.customer_phone || "unknown";
++  const phone = customer?.phone || "unknown"; // ? n?o usa customer_phone
+   const stage = facts?.stage || "";
+   return `${phone}::${stage}::${pendingField || ""}::${normalizeForMatch(text)}`;
+ }
+@@ -882,14 +1360,14 @@ async function classifyInboundInCheckoutLLM({ tenant_id, product_key, facts, co,
+     'Responda APENAS JSON minificado com chaves: type, field, value, confidence.\n' +
+     'type: "objection" | "checkout_data" | "other"\n' +
+     'field: "cep" | "payment" | "channel" | "affiliate_link" | null\n' +
+-    'value: string | null\n' +
+-    "confidence: nÔö£Ôòæmero 0..1\n" +
++    "value: string | null\n" +
++    "confidence: n?mero 0..1\n" +
+     "Regras DURAS:\n" +
+     `- Estamos aguardando SOMENTE o campo: ${pendingField}.\n` +
+-    `- Se o texto NÔö£├óO contiver claramente esse campo (${pendingField}), retorne type="other".\n` +
+-    `- Se for objeÔö£┬║Ôö£├║o (preÔö£┬║o, medo, comparaÔö£┬║Ôö£├║o, dÔö£Ôòævida, desconfianÔö£┬║a): type="objection".\n` +
++    `- Se o texto N?O contiver claramente esse campo (${pendingField}), retorne type="other".\n` +
++    `- Se for obje??o (pre?o, medo, compara??o, d?vida, desconfian?a): type="objection".\n` +
+     "- Nunca retorne um field diferente do pending.\n" +
+-    "NÔö£├║o inclua texto fora do JSON.";
++    "N?o inclua texto fora do JSON.";
+ 
+   const stageContext = {
+     stage: facts.stage || "checkout",
+@@ -915,14 +1393,13 @@ async function classifyInboundInCheckoutLLM({ tenant_id, product_key, facts, co,
+     if (err?.code === "LLM_QUOTA" || msg.includes("429") || msg.toLowerCase().includes("quota")) {
+       return { type: "other", field: null, value: null, confidence: 0 };
+     }
+-    console.error("├ö├ÿ├« [agent] classifier LLM error:", msg);
++    console.error("? [agent] classifier LLM error:", msg);
+     return { type: "other", field: null, value: null, confidence: 0 };
+   }
+ }
+ 
+ /* ======================
+-   ├ö┬ú├á ClassKey SAFE (centralizado)
+-   - Ôö£├£NICO lugar que grava co.llm_class_last_key (exceto reset/finish => null)
++   ? validatePendingInputOrNull()
+ ====================== */
+ function validatePendingInputOrNull({ pendingField, text }) {
+   const raw = normalizeText(text);
+@@ -939,8 +1416,8 @@ function validatePendingInputOrNull({ pendingField, text }) {
+     const chTry = normalizeChannel(raw);
+     const token = String(chTry || "").toLowerCase().replace(/\s+/g, "_");
+ 
+-    const allowed = new Set(["amazon", "mercado_livre", "loja_oficial"]);
+-    const blocked = new Set(["pix", "cartao", "cartÔö£├║o", "whatsapp", "instagram", "telegram"]);
++    const allowed = new Set(["amazon", "mercado_livre", "loja_oficial", "whatsapp"]);
++    const blocked = new Set(["pix", "cartao", "cart?o", "instagram", "telegram"]);
+ 
+     if (!chTry || blocked.has(token) || !allowed.has(token)) return { ok: false, reason: "invalid_channel" };
+     return { ok: true, normalized: chTry };
+@@ -948,9 +1425,9 @@ function validatePendingInputOrNull({ pendingField, text }) {
+ 
+   if (pendingField === "payment") {
+     if (looksLikeUrl(raw)) return { ok: false, reason: "url_in_payment" };
+-    const payTry = normalizePayment(raw); // "pix" | "cartao"
++    const payTry = normalizePayment(raw);
+     const token = String(payTry || "").toLowerCase().replace(/\s+/g, "_");
+-    const allowed = new Set(["pix", "cartao", "cartÔö£├║o"]);
++    const allowed = new Set(["pix", "cartao", "cart?o"]);
+     if (!payTry || !allowed.has(token)) return { ok: false, reason: "invalid_payment" };
+     return { ok: true, normalized: payTry };
+   }
+@@ -963,18 +1440,37 @@ function validatePendingInputOrNull({ pendingField, text }) {
+   return { ok: false, reason: "unknown_pending_field" };
+ }
+ 
++/* ======================
++   ? llm_class_last_key centralizado
++====================== */
++function setCheckoutClassKeySafe({ co, facts, customer, text, pendingField }) {
++  if (!co || !facts || !pendingField) return { allowed: false, classKey: null, written: false, reason: "missing_inputs" };
++
++  const classKey = buildClassifierKey({ customer, facts, text, pendingField });
++  const last = co.llm_class_last_key ? String(co.llm_class_last_key) : "";
++
++  if (last && last === classKey) {
++    return { allowed: false, classKey, written: false, reason: "same_key" };
++  }
++
++  co.llm_class_last_key = classKey;
++  facts._dirty = true;
++
++  return { allowed: true, classKey, written: true, reason: "written" };
++}
++
+ /* ======================
+    Persist / stage sync
+ ====================== */
+ async function maybeSyncStageToDB({ tenant_id, customer, facts }) {
+-  const desired = facts?.stage;
+-  if (!tenant_id || !customer || !desired) return;
++  const desired = String(facts?.stage || "").trim();
++  if (!tenant_id || !customer || !desired) return false;
+ 
+   const customerId = customer?.id ?? customer?.customer_id ?? null;
+   const phone = customer?.phone ?? customer?.customer_phone ?? null;
++  const current = String(customer?.stage || "").trim();
+ 
+-  const current = customer?.stage;
+-  if (String(current || "") === String(desired || "")) return;
++  if (current === desired) return false;
+ 
+   async function tryUpdate(whereSql, params) {
+     const res = await db.run(
+@@ -982,67 +1478,89 @@ async function maybeSyncStageToDB({ tenant_id, customer, facts }) {
+           SET stage = ?
+         WHERE tenant_id = ?
+           AND ${whereSql}`,
+-      [String(desired), tenant_id, ...params]
++      [desired, tenant_id, ...params]
+     );
+     return Number(res?.changes || 0) > 0;
+   }
+ 
+   try {
++    let synced = false;
++
+     if (customerId) {
+-      const ok = await tryUpdate("id = ?", [customerId]);
+-      if (ok) {
+-        customer.stage = String(desired);
+-        return;
+-      }
++      synced = await tryUpdate("id = ?", [customerId]);
+     }
+ 
+-    if (phone) {
+-      const okPhone = await tryUpdate("phone = ?", [phone]);
+-      if (okPhone) {
+-        customer.stage = String(desired);
+-        return;
+-      }
++    if (!synced && phone) {
++      synced = await tryUpdate("phone = ?", [phone]);
+     }
+ 
+-    console.warn("├ö├£├í┬┤┬®├à [agent] stage sync: nenhuma linha atualizada", { tenant_id, customerId, phone, desired });
+-  } catch (e) {
+-    console.error("├ö├ÿ├« [agent] stage sync failed:", e?.message || String(e));
+-  }
+-}
++    if (!synced) {
++      console.warn("?? [agent] stage sync: nenhuma linha atualizada", {
++        tenant_id,
++        customerId,
++        phone,
++        current,
++        desired,
++      });
++      return false;
++    }
+ 
+-async function persistFactsJson({ tenant_id, customer, facts }) {
+-  if (!tenant_id || !customer) return;
++    customer.stage = desired;
+ 
+-  const customerId = customer?.id ?? customer?.customer_id ?? null;
+-  const phone = customer?.phone ?? customer?.customer_phone ?? null;
++facts.metrics = facts.metrics && typeof facts.metrics === "object" ? facts.metrics : {};
++facts.metrics.stage_flow =
++  facts.metrics.stage_flow && typeof facts.metrics.stage_flow === "object"
++    ? facts.metrics.stage_flow
++    : {};
++facts.metrics.stage_flow.counts =
++  facts.metrics.stage_flow.counts && typeof facts.metrics.stage_flow.counts === "object"
++    ? facts.metrics.stage_flow.counts
++    : {};
++facts.metrics.stage_flow.history = Array.isArray(facts.metrics.stage_flow.history)
++  ? facts.metrics.stage_flow.history
++  : [];
+ 
+-  const factsStr = JSON.stringify(facts || {});
++const from = current || "null";
++const to = desired;
++const transitionKey = `${from}->${to}`;
++const transitionAt = new Date().toISOString();
+ 
+-  async function tryUpdate(whereSql, params) {
+-    const res = await db.run(
+-      `UPDATE customers
+-          SET facts_json = ?
+-        WHERE tenant_id = ?
+-          AND ${whereSql}`,
+-      [factsStr, tenant_id, ...params]
+-    );
+-    return Number(res?.changes || 0) > 0;
+-  }
++facts.metrics.stage_flow.counts[transitionKey] =
++  Number(facts.metrics.stage_flow.counts[transitionKey] || 0) + 1;
+ 
+-  try {
+-    if (customerId) {
+-      const ok = await tryUpdate("id = ?", [customerId]);
+-      if (ok) return;
+-    }
++facts.metrics.stage_flow.last_transition = {
++  from,
++  to,
++  at: transitionAt,
++};
+ 
+-    if (phone) {
+-      const okPhone = await tryUpdate("phone = ?", [phone]);
+-      if (okPhone) return;
+-    }
++facts.metrics.stage_flow.history.push({
++  from,
++  to,
++  at: transitionAt,
++});
++
++const MAX_STAGE_HISTORY = 200;
++if (facts.metrics.stage_flow.history.length > MAX_STAGE_HISTORY) {
++  facts.metrics.stage_flow.history =
++    facts.metrics.stage_flow.history.slice(-MAX_STAGE_HISTORY);
++}
++
++facts._dirty = true;
++
++
++    console.log("[agent] STAGE CHANGED", {
++      tenant_id,
++      phone,
++      customerId,
++      from: current || null,
++      to: desired,
++    });
+ 
+-    console.warn("├ö├£├í┬┤┬®├à [agent] persist facts_json: nenhuma linha atualizada", { tenant_id, customerId, phone });
++    return true;
+   } catch (e) {
+-    console.warn("[agent] WARN persist facts_json failed", { tenant_id, customerId, phone, err: String(e?.message || e) });
++    console.error("? [agent] stage sync failed:", e?.message || String(e));
++    return false;
+   }
+ }
+ 
+@@ -1067,7 +1585,6 @@ async function finishCheckout({ tenant_id, customer, facts, co }) {
+ 
+   facts.stage = "pos_checkout";
+ 
+-  // reset anti-loop markers
+   co.llm_class_last_key = null;
+   co.llm_last_inbound_key = null;
+   co.pending_question_last_inbound_key = null;
+@@ -1077,28 +1594,80 @@ async function finishCheckout({ tenant_id, customer, facts, co }) {
+   await maybeSyncStageToDB({ tenant_id, customer, facts });
+   await persistFactsJson({ tenant_id, customer, facts });
+ }
+-
+ function shouldAutoPersistFacts() {
+-  const mode = normalizeForMatch(process.env.PERSIST_FACTS_MODE || "auto");
++  const mode = (process.env.PERSIST_FACTS_MODE || "auto").toLowerCase();
++
+   if (mode.includes("manual")) return "manual";
+   if (mode.includes("always")) return "always";
+   return "auto";
+ }
+ 
++async function persistFactsJson({ tenant_id, customer, facts }) {
++  if (!tenant_id || !customer) return;
++
++  const customerId = customer?.id ?? customer?.customer_id ?? null;
++  const phone = customer?.phone ?? customer?.customer_phone ?? null;
++
++  const factsStr = JSON.stringify(facts || {});
++
++  async function tryUpdate(whereSql, params) {
++    const res = await db.run(
++      `UPDATE customers
++          SET facts_json = ?
++        WHERE tenant_id = ?
++          AND ${whereSql}`,
++      [factsStr, tenant_id, ...params]
++    );
++    return Number(res?.changes || 0) > 0;
++  }
++
++  try {
++    if (customerId) {
++      const ok = await tryUpdate("id = ?", [customerId]);
++      if (ok) return;
++    }
++
++    if (phone) {
++      const okPhone = await tryUpdate("phone = ?", [phone]);
++      if (okPhone) return;
++    }
++
++    console.warn("?? [agent] persist facts_json: nenhuma linha atualizada", {
++      tenant_id,
++      customerId,
++      phone
++    });
++  } catch (e) {
++    console.warn("[agent] WARN persist facts_json failed", {
++      tenant_id,
++      customerId,
++      phone,
++      err: String(e?.message || e)
++    });
++  }
++}
++
+ async function respond({ tenant_id, customer, facts, payload }) {
+   await maybeSyncStageToDB({ tenant_id, customer, facts });
+ 
++  // ?? for?a sincroniza??o do objeto com o banco
++  customer.facts_json = JSON.stringify(facts);
++
++  // ?? garante persist?ncia ap?s mudan?a de stage
++  if (facts) facts._dirty = true;
++
+   const mode = shouldAutoPersistFacts();
++
+   if (mode === "always" || (mode === "auto" && facts && facts._dirty)) {
+     await persistFactsJson({ tenant_id, customer, facts });
++
+     if (facts) facts._dirty = false;
+   }
+ 
+   return payload;
+ }
+-
+ /* ==========================================================
+-   ├ö┬ú├á PASSO 5.5 ├ö├ç├Â BYPASS product_intelligence
++   ? PASSO 5.5 ? BYPASS product_intelligence
+ ========================================================== */
+ function buildIntelBypassResponse({ text, product_intelligence }) {
+   if (!text) return null;
+@@ -1108,7 +1677,7 @@ function buildIntelBypassResponse({ text, product_intelligence }) {
+ 
+   const intelKeywords = [
+     "diferencial",
+-    "diferenciais",
++    "diferenciais", "diferenca", "diferenca",
+     "beneficio",
+     "beneficios",
+     "vantagem",
+@@ -1123,7 +1692,7 @@ function buildIntelBypassResponse({ text, product_intelligence }) {
+     "sobre o produto",
+   ];
+ 
+-  if (!intelKeywords.some((k) => t.includes(k))) return null;
++  if (!intelKeywords.some((k) => t.includes(k)) && !t.includes("diferen")) return null;
+ 
+   const diffs = Array.isArray(product_intelligence.differentials) ? product_intelligence.differentials.filter(Boolean) : [];
+   const benefits = Array.isArray(product_intelligence.main_benefits) ? product_intelligence.main_benefits.filter(Boolean) : [];
+@@ -1135,11 +1704,11 @@ function buildIntelBypassResponse({ text, product_intelligence }) {
+   const lines = [line1, line2].filter(Boolean).slice(0, 2);
+   if (!lines.length) return null;
+ 
+-  return lines.map((s) => String(s).trim()).join("\n");
++  const b = benefits[0] || null; const d = diffs[0] || null; const p1 = proof[0] || null; let response = ""; if (d) response += `${d}. `; if (b) response += `${b}. `; if (p1) response += `${p1}. `; response += "No fim, ele acaba fazendo mais sentido para quem quer praticidade sem complica├º├úo. Se quiser, eu tamb├®m posso te mostrar se ele combina com o que voc├¬ procura."; return response.trim();
+ }
+ 
+ /* ======================
+-   Controle de duplicaÔö£┬║Ôö£├║o no hÔö£┬íbrido
++   Controle de duplica??o no h?brido
+ ====================== */
+ function answerAlreadyMentionsPending(answer, pendingField) {
+   const a = normalizeForMatch(answer || "");
+@@ -1154,7 +1723,7 @@ function answerAlreadyMentionsPending(answer, pendingField) {
+ }
+ 
+ /* ======================
+-   DB helper: primeira interaÔö£┬║Ôö£├║o real (inbound)
++   DB helper: primeira intera??o real (inbound)
+ ====================== */
+ async function inboundCountByPhone({ tenant_id, phone }) {
+   if (!tenant_id || !phone) return 0;
+@@ -1200,10 +1769,35 @@ async function run({ tenant_id, customer, incomingText, decision }) {
+   // 1) Facts
+   let facts = safeJsonParse(customer?.facts_json, {});
+   if (!facts || typeof facts !== "object") facts = {};
++  if (!facts.metrics || typeof facts.metrics !== "object") facts.metrics = {};
++
+   facts = normalizeFactsForCheckout(facts);
+   facts = ensureFactsDefaults(facts, customer);
+ 
+-  // ├ö┬ú├á STAGE SYNC (load): customers.stage ├ö├Ñ├Â facts.stage
++  // ============================
++  // ?? INTENT ENGINE
++  // ============================
++  try {
++    const intentSignals = analyzeIntent({
++      text,
++      stage: facts?.stage || customer?.stage || "",
++      facts,
++      recentMessages: []
++    });
++
++    facts.metrics.intent_signals = {
++      ...intentSignals,
++      updated_at: new Date().toISOString()
++    };
++
++    facts._dirty = true;
++
++    console.log("?? [intent]", facts.metrics.intent_signals);
++  } catch (err) {
++    console.error("? [intentEngine error]", err?.message || String(err));
++  }
++
++  // ? STAGE SYNC (load): customers.stage ? facts.stage
+   {
+     const dbStage = String(customer?.stage || "").trim();
+     const factsStage = String(facts?.stage || "").trim();
+@@ -1218,16 +1812,17 @@ async function run({ tenant_id, customer, incomingText, decision }) {
+ 
+   // 2) Product + training (+ product_intelligence)
+   const product_key = await getCustomerProductKey(tenant_id, customer);
+-
+   const bundle = await getEffectiveTraining({ tenant_id, product_key });
+   const humanTraining = bundle?.training ? bundle.training : bundle;
+   const product_intelligence = bundle?.product_intelligence || null;
+ 
+-  // 3) Carrega playbook (1x)
++  // 3) Playbook (1x)
+   const pbWrap = await getPlaybookRowWithFallback({ tenant_id, product_key });
+   const pb = pbWrap?.pb || null;
+ 
+   console.log("[agent] PLAYBOOK INFO", {
++    source: bundle?.source,
++    has_product_intelligence: !!product_intelligence,
+     tenant_id,
+     phone,
+     product_key_requested: product_key,
+@@ -1241,32 +1836,29 @@ async function run({ tenant_id, customer, incomingText, decision }) {
+   });
+ 
+   // 4) Buy intent => reset forte e entra em checkout
+-  if (isBuyIntent(text)) {
++  if (isBuyIntent(text) && !detectObjection({ objections_json: pb?.objections_json, inboundText: text, stage: facts?.stage })) {
+     facts = resetCheckoutState(facts);
+     facts.checkout.awaiting_cep = true;
+     enforceSingleAwaiting(facts.checkout);
+ 
+     console.log("[agent] ENTER CHECKOUT (reset by buy intent)", { tenant_id, product_key, phone });
+ 
+-    return await respond({
+-      tenant_id,
+-      customer,
++    // FINAL FALLBACK DISABLED\n// return await respond({ tenant_id, customer,
+       facts,
+-      payload: { type: "text", text: humanAskCep(humanTraining), facts },
++      payload: { type: "text", text: humanAskCep(humanTraining, facts), facts },
+     });
+   }
+ 
+-  // 5) Checkout state machine flags
++  // 5) Checkout flags + auto-heal
+   facts.checkout = enforceSingleAwaiting(facts.checkout);
+   const co = facts.checkout;
+ 
+-  // auto-heal awaitings
+   if (co.awaiting_affiliate_link && co.affiliate_url) co.awaiting_affiliate_link = false;
+   if (co.awaiting_channel && co.channel) co.awaiting_channel = false;
+   if (co.awaiting_payment && co.payment) co.awaiting_payment = false;
+   if (co.awaiting_cep && co.cep) co.awaiting_cep = false;
+ 
+-  // se sent => mata awaitings e garante pos_checkout (mas NÔö£├óO bloqueia LLM fora do checkout)
++  // se sent => mata awaitings e garante pos_checkout (mas N?O bloqueia LLM fora do checkout)
+   if (co.sent) {
+     co.awaiting_cep = false;
+     co.awaiting_payment = false;
+@@ -1307,44 +1899,50 @@ async function run({ tenant_id, customer, incomingText, decision }) {
+   });
+ 
+   /* ==========================================================
+-     ├ö┬ú├á ATALHO POS-CHECKOUT (DENTRO do run)
++     ? ATALHO POS-CHECKOUT (DENTRO do run)
+   ========================================================== */
+   if (!needsCheckoutFlow && facts?.stage === "pos_checkout" && co?.sent === true) {
+-    console.log("[agent] POS_CHECKOUT GUARD -> HIT", { tenant_id, phone, inbound: String(text || ""), sent_at: co?.sent_at });
++  console.log("[agent] POS_CHECKOUT GUARD -> HIT", { tenant_id, phone, inbound: String(text || ""), sent_at: co?.sent_at });
+ 
+-    const inboundNorm = normalizeText(text);
+-    const m = normalizeForMatch(inboundNorm);
++  const inboundNorm = normalizeText(text);
++  const m = normalizeForMatch(inboundNorm);
+ 
+-    const isBuyAgain =
+-      isBuyIntent(inboundNorm) || m.includes("comprar de novo") || m.includes("novo pedido") || m.includes("outro");
++  const isBuyAgain =
++    isBuyIntent(inboundNorm) ||
++    m.includes("comprar de novo") ||
++    m.includes("novo pedido") ||
++    m.includes("outro");
+ 
+-    if (isBuyAgain) {
+-      facts = resetCheckoutState(facts);
+-      facts.checkout.awaiting_cep = true;
+-      enforceSingleAwaiting(facts.checkout);
++  if (isBuyAgain) {
++    facts = resetCheckoutState(facts);
++    facts.checkout.awaiting_cep = true;
++    enforceSingleAwaiting(facts.checkout);
+ 
+-      console.log("[agent] POS_CHECKOUT -> restart checkout", { tenant_id, phone });
++    console.log("[agent] POS_CHECKOUT -> restart checkout", { tenant_id, phone });
+ 
+-      return await respond({
+-        tenant_id,
+-        customer,
+-        facts,
+-        payload: { type: "text", text: humanAskCep(humanTraining), facts },
+-      });
+-    }
++    // FINAL FALLBACK DISABLED\n// return await respond({ tenant_id, customer,
++      facts,
++      payload: { type: "text", text: humanAskCep(humanTraining, facts), facts },
++    });
++  }
+ 
+-    const msg =
+-      "Fechou ├ö┬ú├á Seu link jÔö£├¡ foi enviado. " +
+-      "Se quiser *comprar de novo*, diga **quero comprar**. " +
+-      "Se tiver alguma dÔö£Ôòævida, me chama aqui ┬¡ãÆ├û├®";
++  const base =
++    "Fechou! Seu link j├í foi enviado. " +
++    "Se quiser *comprar de novo*, diga **quero comprar**. " +
++    "Se tiver alguma d├║vida, me chama aqui.";
+ 
+-    const out = applyTrainingToOutgoing(msg, humanTraining, "pos_checkout_nudge");
+-    return await respond({ tenant_id, customer, facts, payload: { type: "text", text: out, facts } });
+-  }
++  const trained = applyTrainingToOutgoing(base, humanTraining, "pos_checkout_nudge");
++  const out = trained;
+ 
+-  /* ==========================================================
+-     ├ö┬ú├á BLOCO PRÔö£├½-LLM (fora do checkout)
+-========================================================== */
++  // FINAL FALLBACK DISABLED\n// return await respond({ tenant_id, customer,
++    facts,
++    payload: { type: "text", text: out, facts },
++  });
++}
++
++/* ==========================================================
++     ? PR?-LLM fora do checkout
++  ========================================================== */
+   if (!needsCheckoutFlow) {
+     const inboundNorm = normalizeText(text);
+     const ping = isPingLike(inboundNorm);
+@@ -1352,9 +1950,7 @@ async function run({ tenant_id, customer, incomingText, decision }) {
+     facts.last_playbook_product_key = pbWrap?.used_product_key || product_key;
+     facts.last_reason = pb ? (pbWrap?.fallback_used ? "playbook_default_fallback" : "playbook_product") : "playbook_missing";
+ 
+-    /* ======================
+-       (1) Router PREÔö£├ºO => OFERTA (ANTES de nudge/abertura)
+-    ====================== */
++    // (1) Router PRE?O => OFERTA
+     if (isPriceIntent(inboundNorm)) {
+       facts.stage = "oferta";
+       facts._dirty = true;
+@@ -1364,23 +1960,19 @@ async function run({ tenant_id, customer, incomingText, decision }) {
+       if (pitchOferta && !wasPitchSentFacts(facts, "oferta")) {
+         markPitchSentFacts(facts, "oferta");
+         const out = applyTrainingToOutgoing(pitchOferta, humanTraining, "playbook_pitch_oferta_router_preco");
+-        console.log("[agent] ROUTER PRECO -> OFERTA (pitch)", { tenant_id, phone, used_product_key: facts.last_playbook_product_key });
+ 
+-        return await respond({ tenant_id, customer, facts, payload: { type: "text", text: out, facts } });
++        console.log("[agent] ROUTER PRECO -> OFERTA (pitch)", { tenant_id, phone, used_product_key: facts.last_playbook_product_key });
++        // FINAL FALLBACK DISABLED\n// return await respond({ tenant_id, customer, facts, payload: { type: "text", text: out, facts } });
+       }
+ 
+-      const fallback =
+-        "Consigo te passar o valor certinho ┬¡ãÆ├û├®\n" +
+-        "SÔö£Ôöé me diz: qual produto vocÔö£┬¼ quer (ou qual modelo/kit)?";
++      const fallback = "Consigo te passar o valor certinho ??\nS? me diz: qual produto voc? quer (ou qual modelo/kit)?";
+       const out = applyTrainingToOutgoing(fallback, humanTraining, "router_preco_fallback");
+-      console.log("[agent] ROUTER PRECO -> OFERTA (fallback)", { tenant_id, phone, hasPitchOferta: !!pitchOferta });
+ 
+-      return await respond({ tenant_id, customer, facts, payload: { type: "text", text: out, facts } });
++      console.log("[agent] ROUTER PRECO -> OFERTA (fallback)", { tenant_id, phone, hasPitchOferta: !!pitchOferta });
++      // FINAL FALLBACK DISABLED\n// return await respond({ tenant_id, customer, facts, payload: { type: "text", text: out, facts } });
+     }
+ 
+-    /* ======================
+-       (2) Objection-first (GANHA da abertura/diagnÔö£Ôöéstico/nudge)
+-    ====================== */
++    // (2) Objection-first (ganha de abertura/diagn?stico)
+     if (pb?.objections_json) {
+       try {
+         const stageNow = String(facts?.stage || "").trim() || "abertura";
+@@ -1392,19 +1984,13 @@ async function run({ tenant_id, customer, incomingText, decision }) {
+               ? pb.objections_json
+               : {};
+ 
+-        console.log("[agent] MARKER OBJECTION-FIRST reached", {
+-          tenant_id,
+-          phone,
+-          inboundNorm,
+-          stageNow,
+-          objectionsKeys: Object.keys(objectionsObj || {}).slice(0, 10),
+-        });
++        const hit = detectObjection({ objections_json: objectionsObj, inboundText: inboundNorm, stage: stageNow });
+ 
+-        const hit = detectObjection({
+-          objections_json: objectionsObj,
+-          inboundText: inboundNorm,
+-          stage: stageNow,
+-        });
++        // ? metrics: obje??o fora do checkout (playbook objection-first)
++        if (hit?.key) {
++          const otype = inferObjectionType(inboundNorm) || "other";
++          metrics.bumpObjection(facts, { type: otype, stage: stageNow, pendingField: null, inboundId: decision?.message_id || decision?.inbound_message_id || decision?.wa_message_id || null });
++        }
+ 
+         let chosen = "";
+         if (hit?.key) {
+@@ -1428,64 +2014,51 @@ async function run({ tenant_id, customer, incomingText, decision }) {
+ 
+           const out = applyTrainingToOutgoing(chosen, humanTraining, `playbook_objection_${hit.key}`);
+ 
+-          console.log("[agent] OBJECTION-FIRST -> hit", {
+-            tenant_id,
+-            phone,
+-            key: hit.key,
+-            stage: stageNow,
+-            chosen_preview: out.slice(0, 80),
+-          });
+-
+-          return await respond({ tenant_id, customer, facts, payload: { type: "text", text: out, facts } });
++          console.log("[agent] OBJECTION-FIRST -> hit", { tenant_id, phone, key: hit.key, stage: stageNow });
++          // FINAL FALLBACK DISABLED\n// return await respond({ tenant_id, customer, facts, payload: { type: "text", text: out, facts } });
+         }
+       } catch (e) {
+         console.warn("[agent] WARN OBJECTION-FIRST failed", { err: String(e?.message || e) });
+       }
+     }
+ 
+-    /* ======================
+-       (3) Anti-loop do NUDGE genÔö£┬«rico (ganha do fluxo)
+-    ====================== */
++    // (3) Anti-loop do NUDGE gen?rico
+     if (facts.stage === "abertura" && ping) {
+       if (wasPitchSentFacts(facts, "abertura_nudge")) {
+-        const alt = "Me diz sÔö£Ôöé uma coisa pra eu te ajudar rÔö£├¡pido: **qual produto** vocÔö£┬¼ quer ou **qual dÔö£Ôòævida** vocÔö£┬¼ tem? ┬¡ãÆ├û├®";
++        const alt = "Me diz s? uma coisa pra eu te ajudar r?pido: **qual produto** voc? quer ou **qual d?vida** voc? tem? ??";
+         const outAlt = applyTrainingToOutgoing(alt, humanTraining, "abertura_nudge_alt_no_repeat");
+         facts._dirty = true;
+ 
+         console.log("[agent] NUDGE LOOP -> ALT", { tenant_id, phone });
+-        return await respond({ tenant_id, customer, facts, payload: { type: "text", text: outAlt, facts } });
++        // FINAL FALLBACK DISABLED\n// return await respond({ tenant_id, customer, facts, payload: { type: "text", text: outAlt, facts } });
+       }
+     }
+ 
+-    /* ======================
+-       (4) DIAGNÔö£├┤STICO anti-repeat p/ ping
+-    ====================== */
++    // (4) DIAGN?STICO anti-repeat
+     if (facts.stage === "diagnostico") {
+       const already = wasPitchSentFacts(facts, "diagnostico");
+       const pitchDiag = pb?.pitch_by_stage?.diagnostico ? String(pb.pitch_by_stage.diagnostico).trim() : "";
+ 
+       if (already && ping) {
+         const nudge =
+-          "Fechado ┬¡ãÆ├û├® Me diz rapidinho o que vocÔö£┬¼ quer fazer: **comprar** ou **tirar uma dÔö£Ôòævida**? " +
+-          "Se quiser, jÔö£├¡ fala o produto/assunto tambÔö£┬«m.";
++          "Fechado ?? Me diz rapidinho o que voc? quer fazer: **comprar** ou **tirar uma d?vida**? " +
++          "Se quiser, j? fala o produto/assunto tamb?m.";
+         const out = applyTrainingToOutgoing(nudge, humanTraining, "playbook_diag_nudge_no_repeat");
+-        console.log("[agent] DIAGNOSTICO (anti-repeat) -> nudge", { tenant_id, phone, inboundNorm });
+ 
+-        return await respond({ tenant_id, customer, facts, payload: { type: "text", text: out, facts } });
++        console.log("[agent] DIAGNOSTICO (anti-repeat) -> nudge", { tenant_id, phone });
++        // FINAL FALLBACK DISABLED\n// return await respond({ tenant_id, customer, facts, payload: { type: "text", text: out, facts } });
+       }
+ 
+       if (!already && pitchDiag) {
+         markPitchSentFacts(facts, "diagnostico");
+         const out = applyTrainingToOutgoing(pitchDiag, humanTraining, "playbook_pitch_diagnostico");
+-        console.log("[agent] PLAYBOOK DIAGNOSTICO -> hit", { tenant_id, phone, used_product_key: facts.last_playbook_product_key });
+ 
+-        return await respond({ tenant_id, customer, facts, payload: { type: "text", text: out, facts } });
++        console.log("[agent] PLAYBOOK DIAGNOSTICO -> hit", { tenant_id, phone, used_product_key: facts.last_playbook_product_key });
++        // FINAL FALLBACK DISABLED\n// return await respond({ tenant_id, customer, facts, payload: { type: "text", text: out, facts } });
+       }
+     }
+ 
+-    /* ======================
+-       (5) ABERTURA 1x (primeira interaÔö£┬║Ôö£├║o real) + anti-spam
+-    ====================== */
++    // (5) ABERTURA 1x (primeira intera??o real)
+     try {
+       if (phone) {
+         const inboundCount = await inboundCountByPhone({ tenant_id, phone });
+@@ -1499,25 +2072,21 @@ async function run({ tenant_id, customer, incomingText, decision }) {
+           first,
+           hasPitchAbertura: !!pitchAbertura,
+           alreadySentFacts: wasPitchSentFacts(facts, "abertura"),
+-          used_product_key: facts.last_playbook_product_key,
+-          last_reason: facts.last_reason,
+         });
+ 
+-        if (first && pitchAbertura && !wasPitchSentFacts(facts, "abertura")) {
++        if (first && pitchAbertura && !wasPitchSentFacts(facts, "abertura") && isPingLike(inboundNorm) && inboundNorm.length <= 20) {
+           markPitchSentFacts(facts, "abertura");
+           const out = applyTrainingToOutgoing(pitchAbertura, humanTraining, "playbook_pitch_abertura");
+-          console.log("[agent] PLAYBOOK ABERTURA -> hit", { tenant_id, phone, used_product_key: facts.last_playbook_product_key });
+ 
+-          return await respond({ tenant_id, customer, facts, payload: { type: "text", text: out, facts } });
++          console.log("[agent] PLAYBOOK ABERTURA -> hit", { tenant_id, phone, used_product_key: facts.last_playbook_product_key });
++          // FINAL FALLBACK DISABLED\n// return await respond({ tenant_id, customer, facts, payload: { type: "text", text: out, facts } });
+         }
+       }
+     } catch (e) {
+       console.warn("[agent] WARN ABERTURA failed", { err: String(e?.message || e) });
+     }
+ 
+-    /* ======================
+-       (6) OFERTA/FECHAMENTO por stage (anti-spam)
+-    ====================== */
++    // (6) OFERTA/FECHAMENTO por stage
+     {
+       const stageNow = String(facts?.stage || "").trim();
+ 
+@@ -1526,9 +2095,9 @@ async function run({ tenant_id, customer, incomingText, decision }) {
+         if (pitch) {
+           markPitchSentFacts(facts, "oferta");
+           const out = applyTrainingToOutgoing(pitch, humanTraining, "playbook_pitch_oferta");
+-          console.log("[agent] PLAYBOOK OFERTA -> hit", { tenant_id, phone, used_product_key: facts.last_playbook_product_key });
+ 
+-          return await respond({ tenant_id, customer, facts, payload: { type: "text", text: out, facts } });
++          console.log("[agent] PLAYBOOK OFERTA -> hit", { tenant_id, phone, used_product_key: facts.last_playbook_product_key });
++          // FINAL FALLBACK DISABLED\n// return await respond({ tenant_id, customer, facts, payload: { type: "text", text: out, facts } });
+         }
+       }
+ 
+@@ -1537,138 +2106,338 @@ async function run({ tenant_id, customer, incomingText, decision }) {
+         if (pitch) {
+           markPitchSentFacts(facts, "fechamento");
+           const out = applyTrainingToOutgoing(pitch, humanTraining, "playbook_pitch_fechamento");
+-          console.log("[agent] PLAYBOOK FECHAMENTO -> hit", { tenant_id, phone, used_product_key: facts.last_playbook_product_key });
+ 
+-          return await respond({ tenant_id, customer, facts, payload: { type: "text", text: out, facts } });
++          console.log("[agent] PLAYBOOK FECHAMENTO -> hit", { tenant_id, phone, used_product_key: facts.last_playbook_product_key });
++          // FINAL FALLBACK DISABLED\n// return await respond({ tenant_id, customer, facts, payload: { type: "text", text: out, facts } });
+         }
+       }
+     }
+ 
+-    /* ======================
+-       (7) applyPlaybook() (pitches residuais / policies / rules)
+-    ====================== */
+-    if (pb) {
+-      const applied = await applyPlaybook({
+-        playbook: pb,
+-        inboundText: text,
+-        facts,
+-        applyTrainingToOutgoing,
+-        humanTraining,
+-      });
+-
+-      if (applied.handled) {
+-        const appliedText = String(applied?.text || "").trim();
+-
+-        applied.facts = applied.facts && typeof applied.facts === "object" ? applied.facts : {};
+-        applied.facts = ensureFactsShape(applied.facts);
+-
+-        const isPlaybookNudge =
+-          appliedText.startsWith("Oi!") &&
+-          appliedText.includes("Me diz rapidinho") &&
+-          appliedText.includes("comprar") &&
+-          appliedText.includes("dÔö£Ôòævida");
++// (7) applyPlaybook()
++if (pb) {
++  const applied = await applyPlaybook({
++    playbook: pb,
++    inboundText: text,
++    facts,
++    applyTrainingToOutgoing,
++    humanTraining,
++  });
+ 
+-        if (applied.facts?.stage === "abertura" && ping && isPlaybookNudge) {
+-          if (wasPitchSentFacts(applied.facts, "abertura_nudge")) {
+-            const alt = "Me diz sÔö£Ôöé uma coisa pra eu te ajudar rÔö£├¡pido: **qual produto** vocÔö£┬¼ quer ou **qual dÔö£Ôòævida** vocÔö£┬¼ tem? ┬¡ãÆ├û├®";
+-            const outAlt = applyTrainingToOutgoing(alt, humanTraining, "abertura_nudge_alt_no_repeat");
+-            applied.facts._dirty = true;
++  if (false && applied.handled) {
++    const appliedText = String(applied?.text || "").trim();
++    const leadSignal = detectLeadSignal(text);
++    const stageForDecision = String(applied?.facts?.stage || facts?.stage || "").trim();
++    const appliedTextWithSignal = applyLeadSignalToReply(
++      appliedText,
++      leadSignal,
++      humanTraining,
++      stageForDecision
++    );
+ 
+-            console.log("[agent] PLAYBOOK NUDGE LOOP -> ALT", { tenant_id, phone });
+-            return await respond({
+-              tenant_id,
+-              customer,
+-              facts: applied.facts,
+-              payload: { type: "text", text: outAlt, facts: applied.facts },
+-            });
+-          }
++    applied.facts = applied.facts && typeof applied.facts === "object" ? applied.facts : {};
++    applied.facts = ensureFactsShape(applied.facts);
+ 
+-          applied.facts = markPitchSentFacts(applied.facts, "abertura_nudge");
+-        }
++    const isPlaybookNudge =
++      appliedText.startsWith("Oi!") &&
++      appliedText.includes("Me diz rapidinho") &&
++      appliedText.includes("comprar") &&
++      appliedText.includes("d?vida");
+ 
+-        applied.facts.llm = applied.facts.llm && typeof applied.facts.llm === "object" ? applied.facts.llm : {};
+-        applied.facts.llm.last_used_at = null;
+-        applied.facts.llm.last_reason = "playbook";
++    if (applied.facts?.stage === "abertura" && ping && isPlaybookNudge) {
++      if (wasPitchSentFacts(applied.facts, "abertura_nudge")) {
++        const alt = "Me diz so uma coisa pra eu te ajudar rapido: qual produto voce quer ou qual duvida voce tem?";
++        const outAlt = applyTrainingToOutgoing(alt, humanTraining, "abertura_nudge_alt_no_repeat");
+         applied.facts._dirty = true;
+ 
+-        return await respond({
+-          tenant_id,
+-          customer,
++        console.log("[agent] PLAYBOOK NUDGE LOOP -> ALT", { tenant_id, phone });
++        // FINAL FALLBACK DISABLED\n// return await respond({ tenant_id, customer,
+           facts: applied.facts,
+-          payload: { type: "text", text: applied.text, facts: applied.facts },
++          payload: { type: "text", text: outAlt, facts: applied.facts },
+         });
+       }
++
++      applied.facts = markPitchSentFacts(applied.facts, "abertura_nudge");
++    }
++
++    const checkoutState =
++      applied.facts?.checkout && typeof applied.facts.checkout === "object"
++        ? applied.facts.checkout
++        : {};
++
++    const hardCheckoutLock =
++      !!checkoutState.awaiting_payment ||
++      !!checkoutState.awaiting_channel ||
++      !!checkoutState.awaiting_affiliate_link ||
++      stageForDecision === "checkout_payment" ||
++      stageForDecision === "checkout_channel" ||
++      stageForDecision === "checkout_link";
++
++    applied.facts.llm = applied.facts.llm && typeof applied.facts.llm === "object" ? applied.facts.llm : {};
++    applied.facts.llm.last_used_at = null;
++    applied.facts.llm.last_reason = hardCheckoutLock ? "playbook_checkout_lock" : "playbook_context_only";
++    applied.facts.llm.playbook_candidate_text = appliedTextWithSignal;
++    applied.facts.llm.playbook_candidate_stage = stageForDecision;
++    applied.facts._dirty = true;
++
++    if (facts && typeof facts === "object") {
++      for (const [k, v] of Object.entries(applied.facts)) {
++        facts[k] = v;
++      }
+     }
++
++    if (hardCheckoutLock) {
++      console.log("[agent] PLAYBOOK -> checkout lock", { tenant_id, phone, stage: stageForDecision });
++      // FINAL FALLBACK DISABLED\n// return await respond({ tenant_id, customer,
++        facts: applied.facts,
++        payload: { type: "text", text: appliedTextWithSignal, facts: applied.facts },
++      });
++    }
++
++    console.log("[agent] PLAYBOOK -> context only", { tenant_id, phone, stage: stageForDecision });
++  }
++}
+   }
+ 
+-/* ==========================================================
+-   ├ö┬ú├á 4.0) CHECKOUT: STRONG DETECT + HÔö£├¼BRIDO (OBJEÔö£├ºÔö£├óO) + CLASSIFICADOR (JSON) + HARD RULE
+-   - Importante: llm_class_last_key sÔö£Ôöé Ôö£┬« escrito via setCheckoutClassKeySafe()
++ /* ==========================================================
++   CHECKOUT 4.0 (CORRIGIDO)
++   - bloco ?nico (sem duplica??o)
++   - inboundKey ?nico
++   - sem blocos soltos
+ ========================================================== */
+ if (needsCheckoutFlow) {
+   const pendingField = getPendingFieldFromCheckout(co);
++  const inboundKey = buildInboundKey({ customer, decision, text });
++  const cooldownMs = 90 * 1000;
++
++  // Pergunta pendente (se existir)
++  const pendingQuestion = getCheckoutPendingQuestion(
++    co,
++    humanTraining,
++    co.channel,
++    facts,
++    inboundKey
++  );
+ 
+-  if (pendingField) {
+-    /* ======================
+-       4.0.a) STRONG DETECT
+-    ====================== */
+-    const strong = strongDetectByPending(pendingField, text);
++  // Cooldown: n?o roda LLM; s? reapende pending (sem duplicar)
++  if (pendingQuestion && shouldCooldownHybrid(facts, inboundKey, cooldownMs)) {
++    if (!alreadyAppendedPendingQuestionForThisInbound(facts, inboundKey)) {
++      markPendingQuestionAppendedForInbound(facts, inboundKey);
++
++      const pendingQuestionWithIntent = applyIntentSignalsToReply({
++        text: pendingQuestion,
++        facts,
++        stage: facts?.stage || customer?.stage || "",
++      });
++
++      // FINAL FALLBACK DISABLED\n// return await respond({ tenant_id, customer,
++        facts,
++        payload: { type: "text", text: pendingQuestionWithIntent, facts },
++      });
++    }
++    // se j? apendeu no inbound, n?o faz nada extra; segue pro determin?stico (se tiver dado v?lido)
++  }
++
++  const looksLikeExpectedData =
++    (co.awaiting_cep && !!normalizeCep(text)) ||
++    (co.awaiting_payment && !!normalizePayment(text)) ||
++    (co.awaiting_channel && !!normalizeChannel(text)) ||
++    (co.awaiting_affiliate_link && !!looksLikeUrl(text));
++
++  /* ======================
++     4.0.a.5) H?BRIDO (OBJE??O) ? ANTES da valida??o dura
++  ====================== */
++  const canHybrid =
++    !!pendingQuestion &&
++    !!pendingField &&
++    !looksLikeExpectedData &&
++    looksLikeObjection(text) &&
++    !alreadyUsedLLMForThisInbound(facts, inboundKey) &&
++    !shouldCooldownHybrid(facts, inboundKey, cooldownMs);
++
++  if (canHybrid) {
++    const otype = inferObjectionType(text) || "other";
++    bumpObjectionMetric(facts, otype, {
++      stage: facts.stage,
++      pendingField,
++      inboundId: inboundKey,
++    });
++
++    console.log("[agent] ENTER LLM (checkout_hybrid)", {
++      tenant_id,
++      product_key,
++      inboundKey,
++      pendingField,
++    });
++
++    try {
++      const stageContext = {
++        stage: facts.stage || "checkout",
++        goal: "responder_objecao_sem_quebrar_checkout_e_retornar_para_pergunta_pendente",
++        mode: "checkout_hybrid",
++        pending_field: pendingField,
++        pending_question: removeKnownEmojis(String(pendingQuestion || "")),
++        hard_rule: "NAO repita a pergunta pendente; eu vou anexar se precisar.",
++      };
++
++      markHybridRun(facts, inboundKey);
++
++      console.log("­ƒöÑ LLM FORCED"); const llmOut = await generateLLMResponse({
++        tenant_id,
++        product_key,
++        facts,
++        stageContext,
++        userText: text,
++      });
++
++      markLLMUsedForInbound(facts, inboundKey);
++
++      facts.llm = facts.llm && typeof facts.llm === "object" ? facts.llm : {};
++      facts.llm.last_used_at = new Date().toISOString();
++      facts.llm.last_reason = "checkout_hybrid";
++      facts._dirty = true;
++
++      const answer = applyTrainingToOutgoing(
++        llmOut,
++        humanTraining,
++        "llm_checkout_hybrid"
++      );
++
++      const shouldAppend = !answerAlreadyMentionsPending(answer, pendingField);
++      const shortQ = pendingField
++        ? (getCheckoutPendingQuestionShort(pendingField) || pendingQuestion)
++        : pendingQuestion;
++      const finalText = shouldAppend ? `${answer}\n\n${shortQ}` : answer;
++
++      if (shouldAppend) {
++        markPendingQuestionAppendedForInbound(facts, inboundKey);
++      }
++
++      const leadSignal = detectLeadSignal(text);
++    const finalTextWithLeadSignal = applyLeadSignalToReply(
++      finalText,
++      leadSignal,
++      humanTraining,
++      facts?.stage || ""
++    );
++    const finalTextWithIntent = applyIntentSignalsToReply({
++        text: finalTextWithLeadSignal,
++        facts,
++        stage: facts?.stage || customer?.stage || "",
++      });
++
++      // FINAL FALLBACK DISABLED\n// return await respond({ tenant_id, customer,
++        facts,
++        payload: { type: "text", text: finalTextWithIntent, facts },
++      });
++    } catch (err) {
++      const msg = String(err?.message || err);
++
++      if (
++        err?.code === "LLM_QUOTA" ||
++        msg.includes("429") ||
++        msg.toLowerCase().includes("quota")
++      ) {
++        const fallback = humanLLMQuotaFallback(humanTraining);
++        const shouldAppend = pendingField
++          ? !answerAlreadyMentionsPending(fallback, pendingField)
++          : true;
++        const shortQ = pendingField
++          ? (getCheckoutPendingQuestionShort(pendingField) || pendingQuestion)
++          : pendingQuestion;
++        const finalText =
++          shouldAppend && pendingQuestion
++            ? `${fallback}\n\n${shortQ}`
++            : fallback;
++
++        if (shouldAppend && pendingQuestion) {
++          markPendingQuestionAppendedForInbound(facts, inboundKey);
++        }
++
++        const leadSignal = detectLeadSignal(text);
++    const finalTextWithLeadSignal = applyLeadSignalToReply(
++      finalText,
++      leadSignal,
++      humanTraining,
++      facts?.stage || ""
++    );
++    const finalTextWithIntent = applyIntentSignalsToReply({
++          text: finalTextWithLeadSignal,
++          facts,
++          stage: facts?.stage || customer?.stage || "",
++        });
++
++        // FINAL FALLBACK DISABLED\n// return await respond({ tenant_id, customer,
++          facts,
++          payload: { type: "text", text: finalTextWithIntent, facts },
++        });
++      }
++
++      console.error("? [agent] LLM checkout_hybrid error:", msg);
++      // segue para valida??o/determin?stico/classificador
++    }
++  }
+ 
+-    if (strong) {
+-      console.log("[agent] CHECKOUT STRONG DETECT ->", { pendingField });
++  /* ======================
++     4.0.b) VALIDA??O DURA
++     - se OK => determin?stico direto
++     - se N?O OK => tenta classificador seguro
++  ====================== */
++  if (pendingField) {
++    const v = validatePendingInputOrNull({ pendingField, text });
+ 
++    if (v.ok && v.normalized) {
+       if (pendingField === "cep") {
+-        co.cep = strong.value;
++        co.cep = v.normalized;
+         co.awaiting_cep = false;
+         co.awaiting_payment = true;
+         enforceSingleAwaiting(co);
+ 
+         facts.stage = "checkout_payment";
+         facts._dirty = true;
+-
+-        return await respond({
+-          tenant_id,
+-          customer,
++        // FINAL FALLBACK DISABLED\n// return await respond({ tenant_id, customer,
+           facts,
+-          payload: { type: "text", text: humanAskPayment(humanTraining), facts },
++          payload: { type: "text", text: humanAskPayment(humanTraining, facts), facts },
+         });
+       }
+ 
+       if (pendingField === "payment") {
+-        co.payment = strong.value;
++        co.payment = v.normalized;
+         co.awaiting_payment = false;
+         co.awaiting_channel = true;
+         enforceSingleAwaiting(co);
+ 
+         facts.stage = "checkout_channel";
+         facts._dirty = true;
+-
+-        return await respond({
+-          tenant_id,
+-          customer,
++        // FINAL FALLBACK DISABLED\n// return await respond({ tenant_id, customer,
+           facts,
+-          payload: { type: "text", text: humanAskChannel(humanTraining), facts },
++          payload: { type: "text", text: humanAskChannel(humanTraining, facts), facts },
+         });
+       }
+ 
+       if (pendingField === "channel") {
+-        co.channel = strong.value;
++        co.channel = v.normalized;
+         co.awaiting_channel = false;
+         facts.stage = "checkout_link";
+         facts._dirty = true;
+ 
+-        const directUrl = await getCheckoutUrl({ tenant_id, product_key, channel: co.channel });
++        const directUrl = await getCheckoutUrl({
++          tenant_id,
++          product_key,
++          channel: v.normalized,
++        });
+ 
+         if (directUrl) {
+           co.checkout_url = directUrl;
+           facts._dirty = true;
+           await finishCheckout({ tenant_id, customer, facts, co });
+ 
+-          return await respond({
+-            tenant_id,
+-            customer,
++          // FINAL FALLBACK DISABLED\n// return await respond({ tenant_id, customer,
+             facts,
+-            payload: { type: "text", text: humanSendFinalLink(directUrl, humanTraining), facts },
++            payload: {
++              type: "text",
++              text: humanSendFinalLink(directUrl, humanTraining, facts),
++              facts,
++            },
+           });
+         }
+ 
+@@ -1676,541 +2445,654 @@ if (needsCheckoutFlow) {
+         enforceSingleAwaiting(co);
+         facts._dirty = true;
+ 
+-        return await respond({
+-          tenant_id,
+-          customer,
++        // FINAL FALLBACK DISABLED\n// return await respond({ tenant_id, customer,
+           facts,
+-          payload: { type: "text", text: humanAskAffiliateLink(co.channel, humanTraining), facts },
++          payload: {
++            type: "text",
++            text: humanAskAffiliateLink(v.normalized, humanTraining, facts),
++            facts,
++          },
+         });
+       }
+ 
+       if (pendingField === "affiliate_link") {
+-        co.affiliate_url = strong.value;
++        co.affiliate_url = v.normalized;
+         co.awaiting_affiliate_link = false;
+-        co.checkout_url = strong.value;
++        co.checkout_url = co.affiliate_url;
+         facts._dirty = true;
+ 
+         await finishCheckout({ tenant_id, customer, facts, co });
+-
+-        return await respond({
+-          tenant_id,
+-          customer,
++        // FINAL FALLBACK DISABLED\n// return await respond({ tenant_id, customer,
+           facts,
+-          payload: { type: "text", text: humanSendFinalLink(co.checkout_url, humanTraining), facts },
++          payload: {
++            type: "text",
++            text: humanSendFinalLink(co.checkout_url, humanTraining, facts),
++            facts,
++          },
+         });
+       }
+     }
+ 
+     /* ======================
+-       ├ö┬ú├á 4.0.a.5) HÔö£├¼BRIDO (OBJEÔö£├ºÔö£├óO) ├ö├ç├Â ANTES da validaÔö£┬║Ôö£├║o dura
+-       - SÔö£Ôöé entra se NÔö£├óO parece dado esperado do pending
+-       - Anti-loop: 1x por inboundKey
++       4.0.c) CLASSIFICADOR SEGURO
+     ====================== */
+-    {
+-      const inboundKey = buildInboundKey({ customer, decision, text });
+-
+-      const looksLikeExpectedData =
+-        (co.awaiting_cep && !!normalizeCep(text)) ||
+-        (co.awaiting_payment && !!normalizePayment(text)) ||
+-        (co.awaiting_channel && !!normalizeChannel(text)) ||
+-        (co.awaiting_affiliate_link && !!looksLikeUrl(text));
+-
+-      const pendingQuestion = getCheckoutPendingQuestion(co, humanTraining, co.channel, facts, inboundKey);
+-
+-      const canHybrid =
+-        !!pendingQuestion &&
+-        !looksLikeExpectedData &&
+-        looksLikeObjection(text) &&
+-        !alreadyUsedLLMForThisInbound(facts, inboundKey);
+-
+-      if (canHybrid) {
+-        console.log("[agent] ENTER LLM (checkout_hybrid)", { tenant_id, product_key, inboundKey, pendingField });
+-
+-        try {
+-          const stageContext = {
+-            stage: facts.stage || "checkout",
+-            goal: "responder_objecao_sem_quebrar_checkout_e_retornar_para_pergunta_pendente",
+-            mode: "checkout_hybrid",
+-            pending_field: pendingField,
+-            pending_question: removeKnownEmojis(String(pendingQuestion || "")),
+-            hard_rule: "NAO repita a pergunta pendente; eu vou anexar se precisar.",
+-          };
+-
+-          const llmOut = await generateLLMResponse({
+-            tenant_id,
+-            product_key,
+-            facts,
+-            stageContext,
+-            userText: text,
+-          });
+-
+-          // marca anti-loop do hÔö£┬íbrido
+-          markLLMUsedForInbound(facts, inboundKey);
+-
+-          facts.llm = facts.llm && typeof facts.llm === "object" ? facts.llm : {};
+-          facts.llm.last_used_at = new Date().toISOString();
+-          facts.llm.last_reason = "checkout_hybrid";
+-          facts._dirty = true;
+-
+-          const answer = applyTrainingToOutgoing(llmOut, humanTraining, "llm_checkout_hybrid");
++    if (!v.ok) {
++      const ck = setCheckoutClassKeySafe({
++        co,
++        facts,
++        customer,
++        text,
++        pendingField,
++      });
+ 
+-          const shouldAppend = !answerAlreadyMentionsPending(answer, pendingField);
+-          const finalText = shouldAppend ? `${answer}\n\n${pendingQuestion}` : answer;
++      if (ck.allowed && ck.written === true) {
++        if (!shouldCooldownHybrid(facts, inboundKey, cooldownMs)) {
++          markHybridRun(facts, inboundKey);
++        }
+ 
+-          if (shouldAppend) markPendingQuestionAppendedForInbound(facts, inboundKey);
++        const cls = await classifyInboundInCheckoutLLM({
++          tenant_id,
++          product_key,
++          facts,
++          co,
++          pendingField,
++          text,
++          humanTraining,
++        });
+ 
+-          return await respond({
+-            tenant_id,
+-            customer,
+-            facts,
+-            payload: { type: "text", text: finalText, facts },
+-          });
+-        } catch (err) {
+-          const msg = String(err?.message || err);
++        if (cls.type === "checkout_data" && cls.field === pendingField && cls.value) {
++          console.log("[agent] CHECKOUT CLASSIFIER ACCEPTED", cls);
+ 
+-          if (err?.code === "LLM_QUOTA" || msg.includes("429") || msg.toLowerCase().includes("quota")) {
+-            const inboundKey2 = inboundKey;
+-            const pendingQuestion2 = pendingQuestion;
++          if (pendingField === "cep") {
++            const cep = normalizeCep(cls.value);
++            if (!cep) {
++              // FINAL FALLBACK DISABLED\n// return await respond({ tenant_id, customer,
++                facts,
++                payload: { type: "text", text: humanInvalidCep(humanTraining, facts), facts },
++              });
++            }
+ 
+-            const fallback = humanLLMQuotaFallback(humanTraining);
+-            const shouldAppend = !answerAlreadyMentionsPending(fallback, pendingField);
+-            const finalText = shouldAppend ? `${fallback}\n\n${pendingQuestion2}` : fallback;
++            co.cep = cep;
++            co.awaiting_cep = false;
++            co.awaiting_payment = true;
++            enforceSingleAwaiting(co);
+ 
+-            if (shouldAppend) markPendingQuestionAppendedForInbound(facts, inboundKey2);
++            facts.stage = "checkout_payment";
++            facts._dirty = true;
++            // FINAL FALLBACK DISABLED\n// return await respond({ tenant_id, customer,
++              facts,
++              payload: { type: "text", text: humanAskPayment(humanTraining, facts), facts },
++            });
++          }
+ 
+-            return await respond({
+-              tenant_id,
+-              customer,
++          if (pendingField === "payment") {
++            const pay = normalizePayment(cls.value);
++            if (!pay) {
++              // FINAL FALLBACK DISABLED\n// return await respond({ tenant_id, customer,
++                facts,
++                payload: {
++                  type: "text",
++                  text: humanInvalidPayment(humanTraining, facts),
++                  facts,
++                },
++              });
++            }
++
++            co.payment = pay;
++            co.awaiting_payment = false;
++            co.awaiting_channel = true;
++            enforceSingleAwaiting(co);
++
++            facts.stage = "checkout_channel";
++            facts._dirty = true;
++            // FINAL FALLBACK DISABLED\n// return await respond({ tenant_id, customer,
+               facts,
+-              payload: { type: "text", text: finalText, facts },
++              payload: { type: "text", text: humanAskChannel(humanTraining, facts), facts },
+             });
+           }
+ 
+-          console.error("├ö├ÿ├« [agent] LLM checkout_hybrid error:", msg);
+-          // se falhar, segue pro fluxo abaixo (validaÔö£┬║Ôö£├║o / classificador / determinÔö£┬ístico)
+-        }
+-      }
+-    }
++          if (pendingField === "channel") {
++            const ch = normalizeChannel(cls.value);
++            if (!ch) {
++              // FINAL FALLBACK DISABLED\n// return await respond({ tenant_id, customer,
++                facts,
++                payload: { type: "text", text: humanAskChannel(humanTraining, facts), facts },
++              });
++            }
++
++            co.channel = ch;
++            co.awaiting_channel = false;
++            facts.stage = "checkout_link";
++            facts._dirty = true;
+ 
+-    /* ======================
+-       4.0.b) VALIDAÔö£├ºÔö£├óO DURA
+-    ====================== */
+-    const v = validatePendingInputOrNull({ pendingField, text });
++            const directUrl = await getCheckoutUrl({
++              tenant_id,
++              product_key,
++              channel: ch,
++            });
+ 
+-    if (!v.ok) {
+-      console.log("[agent] CHECKOUT INVALID (pre-classifier)", {
+-        pendingField,
+-        reason: v.reason,
+-      });
++            if (directUrl) {
++              co.checkout_url = directUrl;
++              facts._dirty = true;
++              await finishCheckout({ tenant_id, customer, facts, co });
++
++              // FINAL FALLBACK DISABLED\n// return await respond({ tenant_id, customer,
++                facts,
++                payload: {
++                  type: "text",
++                  text: humanSendFinalLink(directUrl, humanTraining, facts),
++                  facts,
++                },
++              });
++            }
++
++            co.awaiting_affiliate_link = true;
++            enforceSingleAwaiting(co);
++            facts._dirty = true;
+ 
+-      if (pendingField === "cep")
+-        return await respond({ tenant_id, customer, facts, payload: { type: "text", text: humanInvalidCep(humanTraining), facts } });
++            // FINAL FALLBACK DISABLED\n// return await respond({ tenant_id, customer,
++              facts,
++              payload: {
++                type: "text",
++                text: humanAskAffiliateLink(ch, humanTraining, facts),
++                facts,
++              },
++            });
++          }
+ 
+-      if (pendingField === "payment")
+-        return await respond({ tenant_id, customer, facts, payload: { type: "text", text: humanInvalidPayment(humanTraining), facts } });
++          if (pendingField === "affiliate_link") {
++            const link = looksLikeUrl(cls.value) ? cls.value : null;
++            if (!link) {
++              // FINAL FALLBACK DISABLED\n// return await respond({ tenant_id, customer,
++                facts,
++                payload: {
++                  type: "text",
++                  text: humanInvalidAffiliateLink(humanTraining, facts),
++                  facts,
++                },
++              });
++            }
++
++            co.affiliate_url = link;
++            co.awaiting_affiliate_link = false;
++            co.checkout_url = link;
++            facts._dirty = true;
+ 
+-      if (pendingField === "channel")
+-        return await respond({ tenant_id, customer, facts, payload: { type: "text", text: humanAskChannel(humanTraining), facts } });
++            await finishCheckout({ tenant_id, customer, facts, co });
++            // FINAL FALLBACK DISABLED\n// return await respond({ tenant_id, customer,
++              facts,
++              payload: {
++                type: "text",
++                text: humanSendFinalLink(co.checkout_url, humanTraining, facts),
++                facts,
++              },
++            });
++          }
++        }
++      }
+ 
+-      if (pendingField === "affiliate_link")
+-        return await respond({
+-          tenant_id,
+-          customer,
++      if (pendingField === "cep") {
++        // FINAL FALLBACK DISABLED\n// return await respond({ tenant_id, customer,
++          facts,
++          payload: { type: "text", text: humanInvalidCep(humanTraining, facts), facts },
++        });
++      }
++
++      if (pendingField === "payment") {
++        // FINAL FALLBACK DISABLED\n// return await respond({ tenant_id, customer,
+           facts,
+-          payload: { type: "text", text: humanInvalidAffiliateLink(humanTraining), facts },
++          payload: { type: "text", text: humanInvalidPayment(humanTraining, facts), facts },
+         });
++      }
++
++      if (pendingField === "channel") {
++        // FINAL FALLBACK DISABLED\n// return await respond({ tenant_id, customer,
++          facts,
++          payload: { type: "text", text: humanAskChannel(humanTraining, facts), facts },
++        });
++      }
++
++      if (pendingField === "affiliate_link") {
++        // FINAL FALLBACK DISABLED\n// return await respond({ tenant_id, customer,
++          facts,
++          payload: {
++            type: "text",
++            text: humanInvalidAffiliateLink(humanTraining, facts),
++            facts,
++          },
++        });
++      }
+     }
++  }
++}
+ 
+-    if (v.ok && !v.normalized) {
+-      return await respond({
+-        tenant_id,
+-        customer,
++/* ======================
++   4.2..4.5 determin?stico (fallback)
++   (mantido para compat, caso flags existam)
++====================== */
++/* CHECKOUT DETERMINISTICO ANTIGO DESATIVADO
++if (co.awaiting_cep) {
++  console.log("[agent] ENTER CHECKOUT (awaiting_cep)");
++  const cep = normalizeCep(text);
++  if (!cep) {
++    // FINAL FALLBACK DISABLED\n// return await respond({ tenant_id, customer,
++      facts,
++      payload: { type: "text", text: humanInvalidCep(humanTraining, facts), facts },
++    });
++  }
++
++  co.cep = cep;
++  co.awaiting_cep = false;
++  co.awaiting_payment = true;
++  enforceSingleAwaiting(co);
++
++  facts.stage = "checkout_payment";
++  facts._dirty = true;
++  // FINAL FALLBACK DISABLED\n// return await respond({ tenant_id, customer,
++    facts,
++    payload: { type: "text", text: humanAskPayment(humanTraining, facts), facts },
++  });
++}
++
++if (co.awaiting_payment) {
++  console.log("[agent] ENTER CHECKOUT (awaiting_payment)");
++  const pay = normalizePayment(text);
++  if (!pay) {
++    // FINAL FALLBACK DISABLED\n// return await respond({ tenant_id, customer,
++      facts,
++      payload: { type: "text", text: humanInvalidPayment(humanTraining, facts), facts },
++    });
++  }
++
++  co.payment = pay;
++  co.awaiting_payment = false;
++  co.awaiting_channel = true;
++  enforceSingleAwaiting(co);
++
++  facts.stage = "checkout_channel";
++  facts._dirty = true;
++  // FINAL FALLBACK DISABLED\n// return await respond({ tenant_id, customer,
++    facts,
++    payload: { type: "text", text: humanAskChannel(humanTraining, facts), facts },
++  });
++}
++
++if (co.awaiting_channel) {
++  console.log("[agent] ENTER CHECKOUT (awaiting_channel)");
++  const ch = normalizeChannel(text);
++  if (!ch) {
++    // FINAL FALLBACK DISABLED\n// return await respond({ tenant_id, customer,
++      facts,
++      payload: { type: "text", text: humanAskChannel(humanTraining, facts), facts },
++    });
++  }
++
++  co.channel = ch;
++  co.awaiting_channel = false;
++  facts.stage = "checkout_link";
++  facts._dirty = true;
++
++  const directUrl = await getCheckoutUrl({ tenant_id, product_key, channel: ch });
++  if (directUrl) {
++    co.checkout_url = directUrl;
++    facts._dirty = true;
++    await finishCheckout({ tenant_id, customer, facts, co });
++
++    // FINAL FALLBACK DISABLED\n// return await respond({ tenant_id, customer,
++      facts,
++      payload: {
++        type: "text",
++        text: humanSendFinalLink(directUrl, humanTraining, facts),
++        facts,
++      },
++    });
++  }
++
++  co.awaiting_affiliate_link = true;
++  enforceSingleAwaiting(co);
++  facts._dirty = true;
++
++  // FINAL FALLBACK DISABLED\n// return await respond({ tenant_id, customer,
++    facts,
++    payload: {
++      type: "text",
++      text: humanAskAffiliateLink(ch, humanTraining, facts),
++      facts,
++    },
++  });
++}
++
++if (co.awaiting_affiliate_link) {
++  console.log("[agent] ENTER CHECKOUT (awaiting_affiliate_link)");
++  if (!looksLikeUrl(text)) {
++    // FINAL FALLBACK DISABLED\n// return await respond({ tenant_id, customer,
++      facts,
++      payload: {
++        type: "text",
++        text: humanInvalidAffiliateLink(humanTraining, facts),
+         facts,
+-        payload: {
+-          type: "text",
+-          text: getCheckoutPendingQuestion(co, humanTraining, co.channel, facts),
++      },
++    });
++  }
++
++  co.affiliate_url = text;
++  co.awaiting_affiliate_link = false;
++  co.checkout_url = co.affiliate_url;
++  facts._dirty = true;
++
++  await finishCheckout({ tenant_id, customer, facts, co });
++  // FINAL FALLBACK DISABLED\n// return await respond({ tenant_id, customer,
++    facts,
++    payload: {
++      type: "text",
++      text: humanSendFinalLink(co.checkout_url, humanTraining, facts),
++      facts,
++    },
++  });
++}
++
++
++*/
++// 5) CEP "solto" inicia checkout inteligente
++if (!needsCheckoutFlow) {
++  const maybeCep = normalizeCep(text);
++  if (maybeCep) {
++    facts = resetCheckoutState(facts);
++    facts.checkout.cep = maybeCep;
++    facts.checkout.awaiting_payment = true;
++    enforceSingleAwaiting(facts.checkout);
++
++    facts.stage = "checkout_payment";
++    facts._dirty = true;
++    console.log("[agent] ENTER CHECKOUT (smart cep start)", { cep: maybeCep });
++
++    // FINAL FALLBACK DISABLED\n// return await respond({ tenant_id, customer,
++      facts,
++      payload: { type: "text", text: humanAskPayment(humanTraining, facts), facts },
++    });
++  }
++}
++
++/* ======================
++   5.5) BYPASS INTELIGENTE
++====================== */
++if (!needsCheckoutFlow) {
++  const bypass = buildIntelBypassResponse({ text, product_intelligence });
++  if (bypass) {
++    console.log("[agent] INTEL BYPASS HIT");
++
++    const finalText = applyTrainingToOutgoing(bypass, humanTraining, "intel_bypass");
++
++    const leadSignal = detectLeadSignal(text);
++    const finalTextWithLeadSignal = applyLeadSignalToReply(
++      finalText,
++      leadSignal,
++      humanTraining,
++      facts?.stage || ""
++    );
++    const finalTextWithIntent = applyIntentSignalsToReply({
++      text: finalTextWithLeadSignal,
++      facts,
++      stage: facts?.stage || customer?.stage || "",
++    });
++
++    // FINAL FALLBACK DISABLED\n// return await respond({ tenant_id, customer,
++      facts,
++      payload: { type: "text", text: finalTextWithIntent, facts },
++    });
++  }
++}
++
++const blockLLMForDiagPitch =
++  !needsCheckoutFlow &&
++  facts?.stage === "diagnostico" &&
++  !wasPitchSentFacts(facts, "diagnostico");
++
++/* ======================
++   6) LLM fora do checkout
++====================== */
++if (
++  !blockLLMForDiagPitch &&
++  !needsCheckoutFlow &&
++  (process.env.LLM_OUTSIDE_CHECKOUT_MODE === "always" ||
++    shouldUseLLMOutsideCheckout(text))
++) {
++  console.log("[agent] ENTER LLM");
++  try {
++    facts.llm = facts.llm && typeof facts.llm === "object" ? facts.llm : {};
++
++    const playbookCandidateText = String(facts?.llm?.playbook_candidate_text || "").trim();
++    const playbookCandidateStage = String(facts?.llm?.playbook_candidate_stage || facts?.stage || "abertura").trim();
++    const hasPlaybookCandidate = !!playbookCandidateText;
++
++    const stageContext = {
++      stage: playbookCandidateStage || facts.stage || "abertura",
++      goal: hasPlaybookCandidate
++        ? "usar_playbook_como_contexto_sem_copiar_literalmente_e_decidir_a_melhor_resposta_para_avancar_1_passo"
++        : "agir_como_vendedor_persuasivo_resolver_objecao_com_prova_gerar_confianca_e_conduzir_para_avanco",
++      decision_mode: "llm_dominant",
++      persuasion_rules: "responder como vendedor experiente de whatsapp: reconhecer dor, explicar por que outras solucoes falharam, mostrar diferencial real do produto, gerar confianca e conduzir com pergunta estrategica",
++      response_style: "natural, humano, direto, sem parecer robo",
++      forbid_generic: true,
++      playbook_candidate_text: playbookCandidateText,
++    };
++
++    facts.llm.context_mode = hasPlaybookCandidate ? "playbook_as_context" : "direct_llm";
++    facts.llm.context_stage = playbookCandidateStage;
++    facts.llm.context_candidate_present = hasPlaybookCandidate;
++    facts._dirty = true;
++
++    // ­ƒöÑ BYPASS REAL DO AGENTE
++    if (false && hasPlaybookCandidate && playbookCandidateText) {
++    // ­ƒöÑ FALLBACK BYPASS (SEM PLAYBOOK)
++    if (!hasPlaybookCandidate) {
++      const pi = product_intelligence || {};
++      const benefit = (pi?.main_benefits || [])[0] || "";
++      const diff = (pi?.differentials || [])[0] || "";
++      const proof = (pi?.proof || [])[0] || "";
++
++      const baseText = [benefit, diff, proof].filter(Boolean).join(". "); const objectionLike = /nao funcionou|n├úo funcionou|ja tentei|j├í tentei|nao deu certo|n├úo deu certo|tentei outras|tentei de tudo/i.test(text); const intro = objectionLike ? "Entendo, isso acontece bastante quando a pessoa j├í tentou outras formas e n├úo teve o resultado esperado. " : ""; const structuredText = objectionLike ? `${intro}${benefit}. ${diff}. ${proof}.` : baseText;
++
++      if (baseText) {
++        console.log("[AGENT FALLBACK BYPASS]");
++
++        // FINAL FALLBACK DISABLED\n// return await respond({ tenant_id, customer,
+           facts,
+-        },
++          payload: {
++            type: "text",
++            text: `${/nao funcionou|n├úo funcionou|ja tentei|j├í tentei|nao deu certo|n├úo deu certo|tentei outras|tentei de tudo/i.test(text) ? "Entendo, e isso acontece muito quando a pessoa j├í tentou outras op├º├Áes e mesmo assim n├úo viu o resultado que esperava. " : "Claro. "}${structuredText} ${/nao funcionou|n├úo funcionou|ja tentei|j├í tentei|nao deu certo|n├úo deu certo|tentei outras|tentei de tudo/i.test(text) ? "Pra eu te orientar melhor, me conta: o que voc├¬ j├í tentou antes e o que sentiu que n├úo funcionou?" : "O que mais te chamou aten├º├úo nesse produto at├® agora?"}`,
++            facts
++          },
++        });
++      }
++    }
++      console.log("[AGENT ACTIVE BYPASS]");
++
++      const bypassText = applyTrainingToOutgoing(playbookCandidateText, humanTraining, "playbook_bypass");
++
++      // FINAL FALLBACK DISABLED\n// return await respond({ tenant_id, customer,
++        facts,
++        payload: { type: "text", text: bypassText, facts },
+       });
+     }
++    console.log("­ƒöÑ LLM FORCED"); const llmOut = await generateLLMResponse({
++      tenant_id,
++      product_key,
++      facts,
++      stageContext,
++      userText: text,
++    });
+ 
+-    /* ======================
+-       4.0.c) CLASSIFICADOR SEGURO
+-       - usa normalized pra classKey
+-       - aplica cls.value diretamente (sem recursÔö£├║o run())
+-    ====================== */
+-    const norm = v.normalized;
++    facts.llm = facts.llm && typeof facts.llm === "object" ? facts.llm : {};
++    facts.llm.last_used_at = new Date().toISOString();
++    facts.llm.last_reason = hasPlaybookCandidate ? "outside_checkout_dominant_with_playbook_context" : "outside_checkout_dominant";
++    facts.llm.playbook_candidate_text = null;
++    facts.llm.playbook_candidate_stage = null;
++    facts._dirty = true;
+ 
+-    const ck = setCheckoutClassKeySafe({
+-      co,
++    const finalText = applyTrainingToOutgoing(llmOut, humanTraining, "llm");
++
++    const leadSignal = detectLeadSignal(text);
++    const finalTextWithLeadSignal = applyLeadSignalToReply(
++      finalText,
++      leadSignal,
++      humanTraining,
++      facts?.stage || ""
++    );
++    const finalTextWithIntent = applyIntentSignalsToReply({
++      text: finalTextWithLeadSignal,
+       facts,
+-      customer,
+-      text: norm,
+-      pendingField,
++      stage: facts?.stage || customer?.stage || "",
+     });
+ 
+-    if (ck.allowed && ck.classKey && ck.written === true) {
+-      const cls = await classifyInboundInCheckoutLLM({
+-        tenant_id,
+-        product_key,
++    // FINAL FALLBACK DISABLED\n// return await respond({ tenant_id, customer,
++      facts,
++      payload: { type: "text", text: finalTextWithIntent, facts },
++    });
++  } catch (err) {
++    const msg = String(err?.message || err);
++
++    if (
++      err?.code === "LLM_QUOTA" ||
++      msg.includes("429") ||
++      msg.toLowerCase().includes("quota")
++    ) {
++      const fallback = humanLLMQuotaFallback(humanTraining);
++
++      const fallbackWithIntent = applyIntentSignalsToReply({
++        text: fallback,
+         facts,
+-        co,
+-        pendingField,
+-        text,
+-        humanTraining,
++        stage: facts?.stage || customer?.stage || "",
+       });
+ 
+-      if (cls.type === "checkout_data" && cls.field === pendingField && cls.value) {
+-        console.log("[agent] CHECKOUT CLASSIFIER ACCEPTED", cls);
++      // FINAL FALLBACK DISABLED\n// return await respond({ tenant_id, customer,
++        facts,
++        payload: { type: "text", text: fallbackWithIntent, facts },
++      });
++    }
++
++    console.error("? [agent] LLM error:", msg);
++  }
++} else if (blockLLMForDiagPitch) {
++  console.log("[agent] BLOCK LLM (waiting pitch diagnostico once)");
++}
++
++/* ======================
++   7) Fallback gen?rico
++====================== */
++const lower = normalizeForMatch(text);
++const hasOpened = wasPitchSentFacts(facts, "abertura");
++
++let fallbackBase;
++if (lower === "oi") {
++  fallbackBase = hasOpened
++    ? "Beleza ?? me diz: voc? quer comprar agora ou qual ? a tua d?vida?"
++    : "Oi! ?? Me diz rapidinho: voc? quer comprar agora ou tirar uma d?vida?";
++} else {
++  fallbackBase =
++    "Antes de te passar o melhor caminho, me diz: voc? quer comprar agora ou s? tirar uma d?vida? ??";
++}
++
++if (false && !needsCheckoutFlow && isPingLike(text) && fallbackBase.includes("Me diz rapidinho")) {
++  if (!wasPitchSentFacts(facts, "abertura_nudge")) {
++    markPitchSentFacts(facts, "abertura_nudge");
++  }
++}
++
++const fallback = applyTrainingToOutgoing(fallbackBase, humanTraining, "fallback");
++const fallbackWithIntent = applyIntentSignalsToReply({
++  text: fallback,
++  facts,
++  stage: facts?.stage || customer?.stage || "",
++});
++
++// FINAL FALLBACK DISABLED\n// return await respond({ tenant_id, customer,
++  facts,
++  payload: { type: "text", text: fallbackWithIntent, facts },
++});
++}
++
++module.exports = { run };
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
+ 
+-        // aplica diretamente o valor classificado (sem chamar run())
+-        if (pendingField === "cep") {
+-          const cep = normalizeCep(cls.value) || normalizeCep(norm);
+-          if (!cep) {
+-            return await respond({ tenant_id, customer, facts, payload: { type: "text", text: humanInvalidCep(humanTraining), facts } });
+-          }
+-          co.cep = cep;
+-          co.awaiting_cep = false;
+-          co.awaiting_payment = true;
+-          enforceSingleAwaiting(co);
+ 
+-          facts.stage = "checkout_payment";
+-          facts._dirty = true;
+ 
+-          return await respond({ tenant_id, customer, facts, payload: { type: "text", text: humanAskPayment(humanTraining), facts } });
+-        }
+ 
+-        if (pendingField === "payment") {
+-          const pay = normalizePayment(cls.value) || normalizePayment(norm);
+-          if (!pay) {
+-            return await respond({
+-              tenant_id,
+-              customer,
+-              facts,
+-              payload: { type: "text", text: humanInvalidPayment(humanTraining), facts },
+-            });
+-          }
+-          co.payment = pay;
+-          co.awaiting_payment = false;
+-          co.awaiting_channel = true;
+-          enforceSingleAwaiting(co);
+ 
+-          facts.stage = "checkout_channel";
+-          facts._dirty = true;
+ 
+-          return await respond({ tenant_id, customer, facts, payload: { type: "text", text: humanAskChannel(humanTraining), facts } });
+-        }
+ 
+-        if (pendingField === "channel") {
+-          const ch = normalizeChannel(cls.value) || normalizeChannel(norm);
+-          if (!ch) {
+-            return await respond({ tenant_id, customer, facts, payload: { type: "text", text: humanAskChannel(humanTraining), facts } });
+-          }
+ 
+-          co.channel = ch;
+-          co.awaiting_channel = false;
+-          facts.stage = "checkout_link";
+-          facts._dirty = true;
+ 
+-          const directUrl = await getCheckoutUrl({ tenant_id, product_key, channel: ch });
+-          if (directUrl) {
+-            co.checkout_url = directUrl;
+-            facts._dirty = true;
+-            await finishCheckout({ tenant_id, customer, facts, co });
+ 
+-            return await respond({
+-              tenant_id,
+-              customer,
+-              facts,
+-              payload: { type: "text", text: humanSendFinalLink(directUrl, humanTraining), facts },
+-            });
+-          }
+ 
+-          co.awaiting_affiliate_link = true;
+-          enforceSingleAwaiting(co);
+-          facts._dirty = true;
+ 
+-          return await respond({
+-            tenant_id,
+-            customer,
+-            facts,
+-            payload: { type: "text", text: humanAskAffiliateLink(ch, humanTraining), facts },
+-          });
+-        }
+ 
+-        if (pendingField === "affiliate_link") {
+-          const link = looksLikeUrl(cls.value) ? cls.value : looksLikeUrl(norm) ? norm : null;
+-          if (!link) {
+-            return await respond({
+-              tenant_id,
+-              customer,
+-              facts,
+-              payload: { type: "text", text: humanInvalidAffiliateLink(humanTraining), facts },
+-            });
+-          }
+ 
+-          co.affiliate_url = link;
+-          co.awaiting_affiliate_link = false;
+-          co.checkout_url = link;
+-          facts._dirty = true;
+ 
+-          await finishCheckout({ tenant_id, customer, facts, co });
+ 
+-          return await respond({
+-            tenant_id,
+-            customer,
+-            facts,
+-            payload: { type: "text", text: humanSendFinalLink(co.checkout_url, humanTraining), facts },
+-          });
+-        }
+-      }
+-    }
+-  } // <-- fecha pendingField
+-} // <-- fecha needsCheckoutFlow
+ 
+-  /* ======================
+-     ├ö┬ú├á 4.1) LLM hÔö£┬íbrido dentro do checkout (objeÔö£┬║Ôö£├║o + volta p/ pending)
+-  ====================== */
+-  if (needsCheckoutFlow) {
+-    const inboundKey = buildInboundKey({ customer, decision, text });
+ 
+-    const looksLikeExpectedData =
+-      (co.awaiting_cep && !!normalizeCep(text)) ||
+-      (co.awaiting_payment && !!normalizePayment(text)) ||
+-      (co.awaiting_channel && !!normalizeChannel(text)) ||
+-      (co.awaiting_affiliate_link && !!looksLikeUrl(text));
+ 
+-    const pendingField = getPendingFieldFromCheckout(co);
+-    const pendingQuestion = getCheckoutPendingQuestion(co, humanTraining, co.channel, facts, inboundKey);
+ 
+-    const canHybrid =
+-      !!pendingQuestion &&
+-      !looksLikeExpectedData &&
+-      looksLikeObjection(text) &&
+-      !alreadyUsedLLMForThisInbound(facts, inboundKey);
+ 
+-    if (canHybrid) {
+-      console.log("[agent] ENTER LLM (checkout_hybrid)", { tenant_id, product_key, inboundKey, pendingField });
+ 
+-      try {
+-        const stageContext = {
+-          stage: facts.stage || "checkout",
+-          goal: "responder_objecao_sem_quebrar_checkout_e_retornar_para_pergunta_pendente",
+-          mode: "checkout_hybrid",
+-          pending_field: pendingField,
+-          pending_question: removeKnownEmojis(String(pendingQuestion || "")),
+-          hard_rule: "NAO repita a pergunta pendente; eu vou anexar se precisar.",
+-        };
+-
+-        const llmOut = await generateLLMResponse({ tenant_id, product_key, facts, stageContext, userText: text });
+-        markLLMUsedForInbound(facts, inboundKey);
+-
+-        facts.llm = facts.llm && typeof facts.llm === "object" ? facts.llm : {};
+-        facts.llm.last_used_at = new Date().toISOString();
+-        facts.llm.last_reason = "checkout_hybrid";
+-        facts._dirty = true;
+ 
+-        const answer = applyTrainingToOutgoing(llmOut, humanTraining, "llm_checkout_hybrid");
+ 
+-        const shouldAppend = !answerAlreadyMentionsPending(answer, pendingField);
+-        const finalText = shouldAppend ? `${answer}\n\n${pendingQuestion}` : answer;
+-        if (shouldAppend) markPendingQuestionAppendedForInbound(facts, inboundKey);
+ 
+-        return await respond({ tenant_id, customer, facts, payload: { type: "text", text: finalText, facts } });
+-      } catch (err) {
+-        const msg = String(err?.message || err);
+ 
+-        if (err?.code === "LLM_QUOTA" || msg.includes("429") || msg.toLowerCase().includes("quota")) {
+-          const fallback = humanLLMQuotaFallback(humanTraining);
+-          const shouldAppend = !answerAlreadyMentionsPending(fallback, pendingField);
+-          const finalText = shouldAppend ? `${fallback}\n\n${pendingQuestion}` : fallback;
+-          if (shouldAppend) markPendingQuestionAppendedForInbound(facts, inboundKey);
+ 
+-          return await respond({ tenant_id, customer, facts, payload: { type: "text", text: finalText, facts } });
+-        }
+ 
+-        console.error("├ö├ÿ├« [agent] LLM checkout_hybrid error:", msg);
+-      }
+-    }
+-  }
+ 
+-  /* ======================
+-     4.2) CEP (determinÔö£┬ístico)
+-  ====================== */
+-  if (co.awaiting_cep) {
+-    console.log("[agent] ENTER CHECKOUT (awaiting_cep)");
+-    const cep = normalizeCep(text);
+-    if (!cep) {
+-      return await respond({ tenant_id, customer, facts, payload: { type: "text", text: humanInvalidCep(humanTraining), facts } });
+-    }
+ 
+-    co.cep = cep;
+-    co.awaiting_cep = false;
+-    co.awaiting_payment = true;
+-    enforceSingleAwaiting(co);
+ 
+-    facts.stage = "checkout_payment";
+-    facts._dirty = true;
+-    return await respond({ tenant_id, customer, facts, payload: { type: "text", text: humanAskPayment(humanTraining), facts } });
+-  }
+ 
+-  /* ======================
+-     4.3) Payment (determinÔö£┬ístico)
+-  ====================== */
+-  if (co.awaiting_payment) {
+-    console.log("[agent] ENTER CHECKOUT (awaiting_payment)");
+-    const pay = normalizePayment(text);
+-    if (!pay) {
+-      return await respond({ tenant_id, customer, facts, payload: { type: "text", text: humanInvalidPayment(humanTraining), facts } });
+-    }
+ 
+-    co.payment = pay;
+-    co.awaiting_payment = false;
+-    co.awaiting_channel = true;
+-    enforceSingleAwaiting(co);
+ 
+-    facts.stage = "checkout_channel";
+-    facts._dirty = true;
+-    return await respond({ tenant_id, customer, facts, payload: { type: "text", text: humanAskChannel(humanTraining), facts } });
+-  }
+ 
+-  /* ======================
+-     4.4) Channel (determinÔö£┬ístico)
+-  ====================== */
+-  if (co.awaiting_channel) {
+-    console.log("[agent] ENTER CHECKOUT (awaiting_channel)");
+-    const ch = normalizeChannel(text);
+-    if (!ch) {
+-      return await respond({ tenant_id, customer, facts, payload: { type: "text", text: humanAskChannel(humanTraining), facts } });
+-    }
+ 
+-    co.channel = ch;
+-    co.awaiting_channel = false;
+-    facts.stage = "checkout_link";
+-    facts._dirty = true;
+ 
+-    const directUrl = await getCheckoutUrl({ tenant_id, product_key, channel: ch });
+-    if (directUrl) {
+-      co.checkout_url = directUrl;
+-      facts._dirty = true;
+-      await finishCheckout({ tenant_id, customer, facts, co });
+-      return await respond({ tenant_id, customer, facts, payload: { type: "text", text: humanSendFinalLink(directUrl, humanTraining), facts } });
+-    }
+ 
+-    co.awaiting_affiliate_link = true;
+-    enforceSingleAwaiting(co);
+-    facts._dirty = true;
+ 
+-    return await respond({ tenant_id, customer, facts, payload: { type: "text", text: humanAskAffiliateLink(ch, humanTraining), facts } });
+-  }
+ 
+-  /* ======================
+-     4.5) Affiliate link (determinÔö£┬ístico)
+-  ====================== */
+-  if (co.awaiting_affiliate_link) {
+-    console.log("[agent] ENTER CHECKOUT (awaiting_affiliate_link)");
+-    if (!looksLikeUrl(text)) {
+-      return await respond({ tenant_id, customer, facts, payload: { type: "text", text: humanInvalidAffiliateLink(humanTraining), facts } });
+-    }
+ 
+-    co.affiliate_url = text;
+-    co.awaiting_affiliate_link = false;
+-    co.checkout_url = co.affiliate_url;
+-    facts._dirty = true;
+ 
+-    await finishCheckout({ tenant_id, customer, facts, co });
+-    return await respond({ tenant_id, customer, facts, payload: { type: "text", text: humanSendFinalLink(co.checkout_url, humanTraining), facts } });
+-  }
+ 
+-  // 5) CEP ├ö├ç┬úsolto├ö├ç├ÿ inicia checkout inteligente
+-  if (!needsCheckoutFlow) {
+-    const maybeCep = normalizeCep(text);
+-    if (maybeCep) {
+-      facts = resetCheckoutState(facts);
+-      facts.checkout.cep = maybeCep;
+-      facts.checkout.awaiting_payment = true;
+-      enforceSingleAwaiting(facts.checkout);
+-
+-      facts.stage = "checkout_payment";
+-      facts._dirty = true;
+-      console.log("[agent] ENTER CHECKOUT (smart cep start)", { cep: maybeCep });
+ 
+-      return await respond({ tenant_id, customer, facts, payload: { type: "text", text: humanAskPayment(humanTraining), facts } });
+-    }
+-  }
+ 
+-  /* ======================
+-     ├ö┬ú├á 5.5) BYPASS INTELIGENTE ├ö├ç├Â DIFERENCIAIS / BENEFÔö£├¼CIOS
+-  ====================== */
+-  if (!needsCheckoutFlow) {
+-    const bypass = buildIntelBypassResponse({ text, product_intelligence });
+-    if (bypass) {
+-      console.log("[agent] INTEL BYPASS HIT");
+-      const finalText = applyTrainingToOutgoing(bypass, humanTraining, "intel_bypass");
+-      return await respond({ tenant_id, customer, facts, payload: { type: "text", text: finalText, facts } });
+-    }
+-  }
+ 
+-  // trava: se estÔö£├¡ no diagnostico e ainda nÔö£├║o enviou pitch, nÔö£├║o deixa o LLM tomar o controle
+-  const blockLLMForDiagPitch = !needsCheckoutFlow && facts?.stage === "diagnostico" && !wasPitchSentFacts(facts, "diagnostico");
+ 
+-  /* ======================
+-     6) LLM fora do checkout
+-  ====================== */
+-  if (
+-    !blockLLMForDiagPitch &&
+-    !needsCheckoutFlow &&
+-    (process.env.LLM_OUTSIDE_CHECKOUT_MODE === "always" || shouldUseLLMOutsideCheckout(text))
+-  ) {
+-    console.log("[agent] ENTER LLM");
+-    try {
+-      const stageContext = { stage: facts.stage || "abertura", goal: "resolver_duvida_ou_objecao_e_avancar_1_passo" };
+ 
+-      const llmOut = await generateLLMResponse({ tenant_id, product_key, facts, stageContext, userText: text });
+ 
+-      facts.llm = facts.llm && typeof facts.llm === "object" ? facts.llm : {};
+-      facts.llm.last_used_at = new Date().toISOString();
+-      facts.llm.last_reason = "outside_checkout";
+-      facts._dirty = true;
+ 
+-      const finalText = applyTrainingToOutgoing(llmOut, humanTraining, "llm");
+-      return await respond({ tenant_id, customer, facts, payload: { type: "text", text: finalText, facts } });
+-    } catch (err) {
+-      const msg = String(err?.message || err);
+ 
+-      if (err?.code === "LLM_QUOTA" || msg.includes("429") || msg.toLowerCase().includes("quota")) {
+-        return await respond({ tenant_id, customer, facts, payload: { type: "text", text: humanLLMQuotaFallback(humanTraining), facts } });
+-      }
+ 
+-      console.error("├ö├ÿ├« [agent] LLM error:", msg);
+-    }
+-  } else if (blockLLMForDiagPitch) {
+-    console.log("[agent] BLOCK LLM (waiting pitch diagnostico once)");
+-  }
+ 
+-  /* ======================
+-     7) Fallback genÔö£┬«rico (FIX: nÔö£├║o repetir ABERTURA idÔö£┬¼ntica)
+-  ====================== */
+-  const lower = normalizeForMatch(text);
+-  const hasOpened = wasPitchSentFacts(facts, "abertura");
+ 
+-  let fallbackBase;
+-  if (lower === "oi") {
+-    fallbackBase = hasOpened
+-      ? "Beleza ┬¡ãÆ├û├® me diz: vocÔö£┬¼ quer comprar agora ou qual Ôö£┬« a tua dÔö£Ôòævida?"
+-      : "Oi! ┬¡ãÆ├û├® Me diz rapidinho: vocÔö£┬¼ quer comprar agora ou tirar uma dÔö£Ôòævida?";
+-  } else {
+-    fallbackBase = "Antes de te passar o melhor caminho, me diz: vocÔö£┬¼ quer comprar agora ou sÔö£Ôöé tirar uma dÔö£Ôòævida? ┬¡ãÆ├û├®";
+-  }
+ 
+-  if (!needsCheckoutFlow && isPingLike(text) && fallbackBase.includes("Me diz rapidinho")) {
+-    if (!wasPitchSentFacts(facts, "abertura_nudge")) {
+-      markPitchSentFacts(facts, "abertura_nudge");
+-    }
+-  }
+ 
+-  const fallback = applyTrainingToOutgoing(fallbackBase, humanTraining, "fallback");
+-  return await respond({ tenant_id, customer, facts, payload: { type: "text", text: fallback, facts } });
+-}
+ 
+-module.exports = { run };

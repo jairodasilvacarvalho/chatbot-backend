@@ -214,6 +214,7 @@ function initDb() {
           );
 
           await ensureIndex("CREATE INDEX IF NOT EXISTS idx_customers_tenant ON customers(tenant_id)");
+          await ensureIndex("CREATE INDEX IF NOT EXISTS idx_customers_tenant_created ON customers(tenant_id, created_at)");
           await ensureIndex("CREATE INDEX IF NOT EXISTS idx_messages_tenant ON messages(tenant_id)");
           await ensureIndex(
             "CREATE INDEX IF NOT EXISTS idx_messages_tenant_customer_created ON messages(tenant_id, customer_phone, created_at)"

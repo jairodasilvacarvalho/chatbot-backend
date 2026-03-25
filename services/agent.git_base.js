@@ -107,7 +107,6 @@ function normalizeCep(text) {
 
 function normalizeChannel(text) {
   const t = normalizeForMatch(text);
-  
   if (t.includes("amazon")) return "amazon";
   if (t.includes("mercado") || t.includes("ml")) return "mercado_livre";
   if (t.includes("oficial") || t.includes("loja")) return "loja_oficial";
@@ -116,7 +115,6 @@ function normalizeChannel(text) {
 
 function normalizePayment(text) {
   const t = normalizeForMatch(text);
-  
   if (t.includes("pix")) return "pix";
   if (t.includes("cart") || t.includes("credito") || t.includes("debito")) return "cartao";
   if (t.includes("boleto")) return "boleto";
@@ -125,7 +123,6 @@ function normalizePayment(text) {
 
 function isBuyIntent(text) {
   const t = normalizeForMatch(text);
-  
   return (
     t === "quero comprar" ||
     t.includes("quero comprar") ||
@@ -137,7 +134,6 @@ function isBuyIntent(text) {
 
 function isPriceIntent(text) {
   const t = normalizeForMatch(text);
-  
   if (!t) return false;
 
   const patterns = [
@@ -190,10 +186,6 @@ function ensureFactsShape(facts) {
   if (typeof co.sent !== "boolean") co.sent = false;
   if (typeof co.missing !== "boolean") co.missing = false;
 
-
-  // Hybrid cooldown
-  co.last_hybrid_at = Number(co.last_hybrid_at || 0);
-  co.last_hybrid_inbound_key = String(co.last_hybrid_inbound_key || "");
   // Ô£à nullable strings (null ├® permitido)
   if (co.cep == null) co.cep = null;
   if (co.payment == null) co.payment = null;
@@ -718,7 +710,6 @@ function humanLLMQuotaFallback(ht) {
 ====================== */
 function shouldUseLLMOutsideCheckout(text) {
   const t = normalizeForMatch(text);
-  
   if (!t) return false;
 
   const keywords = [
@@ -829,7 +820,7 @@ function looksLikeObjection(textRaw) {
     "atendente",
     "suporte",
   ];
-  return patterns.some((p) => t.includes(normalizeForMatch(p))) || t.includes("medo") || t.includes("receio") || t.includes("duvida") || t.includes("risco");
+  return patterns.some((p) => t.includes(normalizeForMatch(p)));
 }
 
 /* ======================
@@ -1114,7 +1105,6 @@ function buildIntelBypassResponse({ text, product_intelligence }) {
   if (!product_intelligence || typeof product_intelligence !== "object") return null;
 
   const t = normalizeForMatch(text);
-  
 
   const intelKeywords = [
     "diferencial",
@@ -1197,34 +1187,6 @@ async function inboundCountByPhone({ tenant_id, phone }) {
 ====================== */
 async function run({ tenant_id, customer, incomingText, decision }) {
   const text = normalizeText(incomingText);
-
-  // 🚀 OBJECTION FIRST (correto)
-  if (looksLikeObjection(text)) {
-    console.log("[agent] FORCE LLM (OBJECTION FIRST)");
-
-    try {
-      const stageContext = { stage: "abertura", goal: "resolver_objecao_e_avancar" };
-
-      const llmOut = await generateLLMResponse({
-        tenant_id,
-        product_key: "DEFAULT",
-        facts,
-        stageContext,
-        userText: text,
-      });
-
-      const finalText = applyTrainingToOutgoing(llmOut, humanTraining, "llm_objection_first");
-
-      return await respond({
-        tenant_id,
-        customer,
-        facts,
-        payload: { type: "text", text: finalText, facts },
-      });
-    } catch (err) {
-      console.error("[agent] LLM objection-first error:", err);
-    }
-  }
   const phone = customer?.phone || customer?.customer_phone || null;
 
   console.log("### RUN CALLED ###", { tenant_id, phone, incomingText: text });
@@ -1278,21 +1240,8 @@ async function run({ tenant_id, customer, incomingText, decision }) {
     meta: pbWrap?._meta,
   });
 
-  // 🚀 PRIORIDADE: OBJEÇÃO NO PRIMEIRO CONTATO (ANTES DO PLAYBOOK)
-  if (looksLikeObjection(text)) {
-    console.log("[agent] FORCE LLM (objection first)");
-    try {
-      const stageContext = { stage: facts.stage || "abertura", goal: "resolver_objecao_e_avancar" };
-      const llmOut = await generateLLMResponse({ tenant_id, product_key, facts, stageContext, userText: text });
-      const finalText = applyTrainingToOutgoing(llmOut, humanTraining, "llm_objection_first");
-      return await respond({ tenant_id, customer, facts, payload: { type: "text", text: finalText, facts } });
-    } catch (err) {
-      console.error("[agent] LLM objection-first error:", err);
-    }
-  }
-
   // 4) Buy intent => reset forte e entra em checkout
-  if (isBuyIntent(text) && !looksLikeObjection(text)) {
+  if (isBuyIntent(text)) {
     facts = resetCheckoutState(facts);
     facts.checkout.awaiting_cep = true;
     enforceSingleAwaiting(facts.checkout);
@@ -1552,10 +1501,9 @@ async function run({ tenant_id, customer, incomingText, decision }) {
           alreadySentFacts: wasPitchSentFacts(facts, "abertura"),
           used_product_key: facts.last_playbook_product_key,
           last_reason: facts.last_reason,
-          looksLikeObjectionNow: looksLikeObjection(text),
         });
 
-        if (first && pitchAbertura && !wasPitchSentFacts(facts, "abertura") && !looksLikeObjection(text) && !normalizeForMatch(text).includes("medo") && !normalizeForMatch(text).includes("receio") && !normalizeForMatch(text).includes("duvida") && !normalizeForMatch(text).includes("risco")) {
+        if (first && pitchAbertura && !wasPitchSentFacts(facts, "abertura")) {
           markPitchSentFacts(facts, "abertura");
           const out = applyTrainingToOutgoing(pitchAbertura, humanTraining, "playbook_pitch_abertura");
           console.log("[agent] PLAYBOOK ABERTURA -> hit", { tenant_id, phone, used_product_key: facts.last_playbook_product_key });
@@ -2204,7 +2152,7 @@ if (needsCheckoutFlow) {
   }
 
   // trava: se est├í no diagnostico e ainda n├úo enviou pitch, n├úo deixa o LLM tomar o controle
-  const blockLLMForDiagPitch = !needsCheckoutFlow && facts?.stage === "diagnostico" && !wasPitchSentFacts(facts, "diagnostico") && !looksLikeObjection(text);
+  const blockLLMForDiagPitch = !needsCheckoutFlow && facts?.stage === "diagnostico" && !wasPitchSentFacts(facts, "diagnostico");
 
   /* ======================
      6) LLM fora do checkout
@@ -2212,9 +2160,9 @@ if (needsCheckoutFlow) {
   if (
     !blockLLMForDiagPitch &&
     !needsCheckoutFlow &&
-    (process.env.LLM_OUTSIDE_CHECKOUT_MODE === "always" || shouldUseLLMOutsideCheckout(text) || looksLikeObjection(text))
+    (process.env.LLM_OUTSIDE_CHECKOUT_MODE === "always" || shouldUseLLMOutsideCheckout(text))
   ) {
-    console.log("[agent] LLM OUTSIDE DEBUG", { stage: facts?.stage, needsCheckoutFlow, blockLLMForDiagPitch, shouldUseLLMOutsideCheckout: shouldUseLLMOutsideCheckout(text), looksLikeObjection: looksLikeObjection(text), text });    console.log("[agent] ENTER LLM");
+    console.log("[agent] ENTER LLM");
     try {
       const stageContext = { stage: facts.stage || "abertura", goal: "resolver_duvida_ou_objecao_e_avancar_1_passo" };
 
@@ -2266,25 +2214,3 @@ if (needsCheckoutFlow) {
 }
 
 module.exports = { run };
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-

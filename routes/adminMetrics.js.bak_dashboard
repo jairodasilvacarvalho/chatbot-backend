@@ -1,0 +1,347 @@
+const express = require("express");
+const router = express.Router();
+
+const db = require("../config/db");
+const {
+  aggregateStageFlowFromCustomers,
+  computeFunnelConversion,
+  computeStageDropOff,
+  getTopDropOffStages,
+  buildFunnelInsights,
+  buildStageInsights,
+  buildFunnelAlerts,
+} = require("../services/metricsService");
+
+// helper de período
+function resolvePeriodDateFrom(period) {
+  const now = new Date();
+
+  if (period === "today") {
+    const dateFrom = new Date(now);
+    dateFrom.setHours(0, 0, 0, 0);
+    return dateFrom;
+  }
+
+  if (period === "7d") {
+    return new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+  }
+
+  if (period === "30d") {
+    return new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
+  }
+
+  return null;
+}
+
+// helper de busca de customers por período
+async function getCustomersByPeriod(tenant_id, period) {
+  const dateFrom = resolvePeriodDateFrom(period);
+
+  let customers;
+  if (dateFrom) {
+    customers = await db.all(
+      `
+      SELECT facts_json, created_at
+      FROM customers
+      WHERE tenant_id = ?
+        AND created_at >= ?
+      `,
+      [tenant_id, dateFrom.toISOString()]
+    );
+  } else {
+    customers = await db.all(
+      `
+      SELECT facts_json, created_at
+      FROM customers
+      WHERE tenant_id = ?
+      `,
+      [tenant_id]
+    );
+  }
+
+  return {
+    customers,
+    dateFrom,
+  };
+}
+
+// helper de construção do funil
+function buildFunnelResponseData(customers) {
+  const funnel = aggregateStageFlowFromCustomers(customers);
+  const enrichedFunnel = computeFunnelConversion(funnel);
+  const stage_drop_off = computeStageDropOff(enrichedFunnel);
+  const stage_insights = buildStageInsights(stage_drop_off);
+  const top_drop_off = getTopDropOffStages(stage_drop_off);
+  const insights = buildFunnelInsights(stage_drop_off);
+
+  return {
+    funnel: enrichedFunnel,
+    stage_drop_off,
+    stage_insights,
+    top_drop_off,
+    insights,
+  };
+}
+
+// helper de snapshot por período
+async function buildPeriodSnapshot(tenant_id, period) {
+  const { customers, dateFrom } = await getCustomersByPeriod(tenant_id, period);
+  const funnelData = buildFunnelResponseData(customers);
+
+  return {
+    period,
+    date_from: dateFrom ? dateFrom.toISOString() : null,
+    total_customers_considered: customers.length,
+    ...funnelData,
+  };
+}
+
+// helper de metadados de comparação
+function buildComparisonMeta(currentSnapshot, previousSnapshot) {
+  const currentTotal = currentSnapshot.total_customers_considered || 0;
+  const previousTotal = previousSnapshot.total_customers_considered || 0;
+
+  let trend = "stable";
+  if (currentTotal > previousTotal) trend = "up";
+  if (currentTotal < previousTotal) trend = "down";
+
+  let trend_message = "Volume de clientes estável em relação ao período anterior";
+  if (trend === "up") {
+    trend_message = "Volume de clientes acima do período anterior";
+  }
+  if (trend === "down") {
+    trend_message = "Volume de clientes abaixo do período anterior";
+  }
+
+  let customer_delta_percent = null;
+  if (previousTotal > 0) {
+    customer_delta_percent = Number(
+      (((currentTotal - previousTotal) / previousTotal) * 100).toFixed(2)
+    );
+  }
+
+  const currentHealth = currentSnapshot?.insights?.health || "unknown";
+  const previousHealth = previousSnapshot?.insights?.health || "unknown";
+
+  const healthRank = {
+    unknown: 0,
+    critical: 1,
+    warning: 2,
+    healthy: 3,
+  };
+
+  let health_trend = "stable";
+  if ((healthRank[currentHealth] || 0) > (healthRank[previousHealth] || 0)) {
+    health_trend = "improved";
+  }
+  if ((healthRank[currentHealth] || 0) < (healthRank[previousHealth] || 0)) {
+    health_trend = "worsened";
+  }
+
+  let health_trend_message =
+    "Saúde do funil estável em relação ao período anterior";
+  if (health_trend === "improved") {
+    health_trend_message = "Saúde do funil melhor que no período anterior";
+  }
+  if (health_trend === "worsened") {
+    health_trend_message = "Saúde do funil pior que no período anterior";
+  }
+
+  let comparison_summary =
+    "Volume e saúde estáveis em relação ao período anterior";
+
+  if (trend === "up" && health_trend === "improved") {
+    comparison_summary =
+      "Mais clientes que no período anterior e saúde do funil melhor";
+  } else if (trend === "up" && health_trend === "stable") {
+    comparison_summary =
+      "Mais clientes que no período anterior com saúde estável";
+  } else if (trend === "up" && health_trend === "worsened") {
+    comparison_summary =
+      "Mais clientes que no período anterior, mas com saúde do funil pior";
+  } else if (trend === "down" && health_trend === "improved") {
+    comparison_summary =
+      "Menos clientes que no período anterior, mas com saúde do funil melhor";
+  } else if (trend === "down" && health_trend === "stable") {
+    comparison_summary =
+      "Menos clientes que no período anterior com saúde estável";
+  } else if (trend === "down" && health_trend === "worsened") {
+    comparison_summary =
+      "Menos clientes que no período anterior e saúde do funil pior";
+  } else if (trend === "stable" && health_trend === "improved") {
+    comparison_summary = "Volume estável e saúde do funil melhor";
+  } else if (trend === "stable" && health_trend === "worsened") {
+    comparison_summary = "Volume estável, mas saúde do funil pior";
+  }
+
+  return {
+    current_period: currentSnapshot.period,
+    previous_period: previousSnapshot.period,
+    current_total_customers: currentTotal,
+    previous_total_customers: previousTotal,
+    customer_delta: currentTotal - previousTotal,
+    customer_delta_percent,
+    trend,
+    trend_message,
+    current_health: currentHealth,
+    previous_health: previousHealth,
+    health_trend,
+    health_trend_message,
+    comparison_summary,
+  };
+}
+
+// helper de comparação por stage
+function buildStageComparison(currentSnapshot, previousSnapshot) {
+  const currentStages = currentSnapshot?.stage_drop_off || {};
+  const previousStages = previousSnapshot?.stage_drop_off || {};
+
+  const stageComparison = {};
+  const allStages = new Set([
+    ...Object.keys(currentStages),
+    ...Object.keys(previousStages),
+  ]);
+
+  for (const stage of allStages) {
+    if (stage === "pos_checkout") continue;
+
+    const current = currentStages[stage] || {};
+    const previous = previousStages[stage] || {};
+
+    const currentRate = current.conversion_rate || 0;
+    const previousRate = previous.conversion_rate || 0;
+
+    let trend = "stable";
+    if (currentRate > previousRate) trend = "up";
+    if (currentRate < previousRate) trend = "down";
+
+    let delta = null;
+    if (previousRate > 0) {
+      delta = Number((currentRate - previousRate).toFixed(2));
+    } else if (currentRate > 0) {
+      delta = currentRate;
+    }
+
+    stageComparison[stage] = {
+      current_conversion_rate: currentRate,
+      previous_conversion_rate: previousRate,
+      delta,
+      trend,
+    };
+  }
+
+  return stageComparison;
+}
+
+function buildStageComparisonInsights(stageComparison) {
+  const insights = {};
+
+  for (const [stage, data] of Object.entries(stageComparison || {})) {
+    const current = data.current_conversion_rate || 0;
+    const previous = data.previous_conversion_rate || 0;
+    const trend = data.trend || "stable";
+
+    let status = "stable";
+    let message = `Etapa ${stage} está estável em relação ao período anterior.`;
+
+    if (trend === "up") {
+      status = "improving";
+      message = `Etapa ${stage} melhorou em relação ao período anterior.`;
+    }
+
+    if (trend === "down") {
+      status = "worsening";
+      message = `Etapa ${stage} piorou em relação ao período anterior.`;
+    }
+
+    if (previous === 0 && current > 0) {
+      status = "new_signal";
+      message = `Etapa ${stage} passou a apresentar conversão no período atual.`;
+    }
+
+    insights[stage] = {
+      status,
+      message,
+      current_conversion_rate: current,
+      previous_conversion_rate: previous,
+      delta: data.delta,
+      trend,
+    };
+  }
+
+  return insights;
+}
+
+// GET /admin/metrics/funnel
+router.get("/funnel", async (req, res) => {
+  try {
+    const tenant_id = req.headers["x-tenant-id"] || 1;
+    const period = req.query.period || "all";
+
+    const allowedPeriods = new Set(["today", "7d", "30d", "all"]);
+    if (!allowedPeriods.has(period)) {
+      return res.status(400).json({
+        ok: false,
+        error: "invalid_period",
+        allowed: ["today", "7d", "30d", "all"],
+      });
+    }
+
+    const currentSnapshot = await buildPeriodSnapshot(tenant_id, period);
+
+    // lógica simples de período anterior
+    const previousPeriod = period === "30d" ? "7d" : "today";
+    const previousSnapshot = await buildPeriodSnapshot(tenant_id, previousPeriod);
+
+    const comparison = buildComparisonMeta(currentSnapshot, previousSnapshot);
+    const stage_comparison = buildStageComparison(
+      currentSnapshot,
+      previousSnapshot
+    );
+    const stage_comparison_insights =
+      buildStageComparisonInsights(stage_comparison);
+
+    // adapta nomes esperados pelo buildFunnelAlerts
+    const alertsComparison = {
+      ...comparison,
+      volume_trend: comparison.trend || "stable",
+      delta_volume: comparison.customer_delta || 0,
+      current_total: comparison.current_total_customers || 0,
+      previous_total: comparison.previous_total_customers || 0,
+      health_trend:
+        comparison.health_trend === "improved"
+          ? "up"
+          : comparison.health_trend === "worsened"
+          ? "down"
+          : "stable",
+    };
+
+    const alerts = buildFunnelAlerts({
+      funnel: currentSnapshot.funnel,
+      stage_drop_off: currentSnapshot.stage_drop_off,
+      comparison: alertsComparison,
+      stage_comparison,
+      stage_comparison_insights,
+      health: comparison.current_health || "unknown",
+      health_trend: alertsComparison.health_trend,
+    });
+
+    return res.json({
+      ok: true,
+      ...currentSnapshot,
+      comparison,
+      stage_comparison,
+      stage_comparison_insights,
+      alerts,
+    });
+  } catch (err) {
+    console.error("metrics funnel error:", err);
+    return res.status(500).json({
+      ok: false,
+      error: err.message,
+      stack: err.stack,
+    });
+  }
+});
+
+module.exports = router;
