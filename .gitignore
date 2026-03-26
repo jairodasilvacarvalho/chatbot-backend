@@ -1,9 +1,4 @@
-﻿node_modules/
-*.sqlite
-*.sqlite-*
-*.sqbpro
-storage/audio/
-backup-*.patch
-debug_*.js
-check*.js
-db/
+.env
+cloudflared.exe
+tmp_*
+node_modules/
