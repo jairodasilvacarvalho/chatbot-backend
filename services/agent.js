@@ -157,7 +157,7 @@ function isPriceIntent(text) {
   ];
 
   // patterns j├í est├úo "limpos" via normalizeForMatch na compara├º├úo
-  if (patterns.some((p) => t.includes(normalizeForMatch(p)))) return true;
+  if (patterns.some((p) => t.includes(p))) return true;
   if (t.startsWith("quanto") && (t.includes("custa") || t.includes("e") || t.includes("├®"))) return true;
   return false;
 }
@@ -646,11 +646,11 @@ function applyTrainingToOutgoing(text, ht = {}, stage = "") {
   const energy = normalizeForMatch(ht.energy);
   if (energy.includes("baixa")) out = out.replace(/!{2,}/g, "!").replace(/­ƒÿè|­ƒÖé/g, "").trim();
 
-  if (isMoreDirectPressure(ht.pressure_level)) out = out.replace(/\s*\n\s*\n/g, "\n").trim();
+  if (isMoreDirectPressure(ht.pressure_level)) out = out.replace(/\s*\s*/g, "").trim();
 
   if (stage === "send_final") {
     const tail = "Se precisar, eu te ajudo por aqui.";
-    if (!out.toLowerCase().includes("se precisar")) out = out + "\n\n" + tail;
+    if (!out.toLowerCase().includes("se precisar")) out = out + "" + tail;
   }
 
   return out;
@@ -829,7 +829,7 @@ function looksLikeObjection(textRaw) {
     "atendente",
     "suporte",
   ];
-  return patterns.some((p) => t.includes(normalizeForMatch(p))) || t.includes("medo") || t.includes("receio") || t.includes("duvida") || t.includes("risco");
+  return patterns.some((p) => t.includes(p)) || t.includes("medo") || t.includes("receio") || t.includes("duvida") || t.includes("risco");
 }
 
 /* ======================
@@ -888,16 +888,16 @@ async function classifyInboundInCheckoutLLM({ tenant_id, product_key, facts, co,
   if (strong) return { type: "checkout_data", field: strong.field, value: strong.value, confidence: strong.confidence };
 
   const schemaHint =
-    'Responda APENAS JSON minificado com chaves: type, field, value, confidence.\n' +
-    'type: "objection" | "checkout_data" | "other"\n' +
-    'field: "cep" | "payment" | "channel" | "affiliate_link" | null\n' +
-    'value: string | null\n' +
-    "confidence: n├║mero 0..1\n" +
-    "Regras DURAS:\n" +
-    `- Estamos aguardando SOMENTE o campo: ${pendingField}.\n` +
-    `- Se o texto N├âO contiver claramente esse campo (${pendingField}), retorne type="other".\n` +
-    `- Se for obje├º├úo (pre├ºo, medo, compara├º├úo, d├║vida, desconfian├ºa): type="objection".\n` +
-    "- Nunca retorne um field diferente do pending.\n" +
+    'Responda APENAS JSON minificado com chaves: type, field, value, confidence.' +
+    'type: "objection" | "checkout_data" | "other"' +
+    'field: "cep" | "payment" | "channel" | "affiliate_link" | null' +
+    'value: string | null' +
+    "confidence: n├║mero 0..1" +
+    "Regras DURAS:" +
+    `- Estamos aguardando SOMENTE o campo: ${pendingField}.` +
+    `- Se o texto N├âO contiver claramente esse campo (${pendingField}), retorne type="other".` +
+    `- Se for obje├º├úo (pre├ºo, medo, compara├º├úo, d├║vida, desconfian├ºa): type="objection".` +
+    "- Nunca retorne um field diferente do pending." +
     "N├úo inclua texto fora do JSON.";
 
   const stageContext = {
@@ -914,7 +914,7 @@ async function classifyInboundInCheckoutLLM({ tenant_id, product_key, facts, co,
     training_hint: { tone_style: humanTraining?.tone_style, language_level: humanTraining?.language_level },
   };
 
-  const userText = `PENDING_FIELD: ${pendingField}\nTEXTO: ${text}\n\n${schemaHint}`;
+  const userText = `PENDING_FIELD: ${pendingField}TEXTO: ${text}${schemaHint}`;
 
   try {
     const raw = await generateLLMResponse({ tenant_id, product_key, facts, stageContext, userText });
@@ -1145,7 +1145,7 @@ function buildIntelBypassResponse({ text, product_intelligence }) {
   const lines = [line1, line2].filter(Boolean).slice(0, 2);
   if (!lines.length) return null;
 
-  return lines.map((s) => String(s).trim()).join("\n");
+  return lines.map((s) => String(s).trim()).join("");
 }
 
 /* ======================
@@ -1196,35 +1196,7 @@ async function inboundCountByPhone({ tenant_id, phone }) {
    Main
 ====================== */
 async function run({ tenant_id, customer, incomingText, decision }) {
-  const text = normalizeText(incomingText);
-
-  // 🚀 OBJECTION FIRST (correto)
-  if (looksLikeObjection(text)) {
-    console.log("[agent] FORCE LLM (OBJECTION FIRST)");
-
-    try {
-      const stageContext = { stage: "abertura", goal: "acolher_objecao_responder_com_seguranca_e_conduzir_para_proximo_microcompromisso_de_compra" };
-
-      const llmOut = await generateLLMResponse({
-        tenant_id,
-        product_key: "DEFAULT",
-        facts,
-        stageContext,
-        userText: text,
-      });
-
-      const finalText = appendSmartAdvance(applyTrainingToOutgoing(llmOut, humanTraining, "llm_objection_first"), facts);
-
-      return await respond({
-        tenant_id,
-        customer,
-        facts,
-        payload: { type: "text", text: finalText, facts },
-      });
-    } catch (err) {
-      console.error("[agent] LLM objection-first error:", err);
-    }
-  }
+  const text = normalizeForMatch(incomingText);
   const phone = customer?.phone || customer?.customer_phone || null;
 
   console.log("### RUN CALLED ###", { tenant_id, phone, incomingText: text });
@@ -1240,6 +1212,37 @@ async function run({ tenant_id, customer, incomingText, decision }) {
   if (!facts || typeof facts !== "object") facts = {};
   facts = normalizeFactsForCheckout(facts);
   facts = ensureFactsDefaults(facts, customer);
+
+  // 🔥 PRIORIDADE TOTAL: OBJECTION
+  if (detectIntent(text) === "objection") {
+    console.log("[agent] INTENT: objection");
+    try {
+      const stageContext = {
+        stage: facts.stage || "abertura",
+        goal: "responder_duvida_ou_objecao_com_clareza_e_conduzir_para_proximo_passo",
+      };
+      const llmOut = await generateLLMResponse({
+        tenant_id,
+        product_key: "DEFAULT",
+        facts,
+        stageContext,
+        userText: text,
+      });
+      const finalText = appendSmartAdvance(
+        applyTrainingToOutgoing(llmOut, {}, "llm_objection_first"),
+        facts,
+        text
+      );
+      return await respond({
+        tenant_id,
+        customer,
+        facts,
+        payload: { type: "text", text: finalText, facts },
+      });
+    } catch (err) {
+      console.error("[agent] INTENT objection error:", err);
+    }
+  }
 
   // Ô£à STAGE SYNC (load): customers.stage Ôåö facts.stage
   {
@@ -1284,7 +1287,7 @@ async function run({ tenant_id, customer, incomingText, decision }) {
     try {
       const stageContext = { stage: facts.stage || "abertura", goal: "acolher_objecao_responder_com_seguranca_e_conduzir_para_proximo_microcompromisso_de_compra" };
       const llmOut = await generateLLMResponse({ tenant_id, product_key, facts, stageContext, userText: text });
-      const finalText = appendSmartAdvance(applyTrainingToOutgoing(llmOut, humanTraining, "llm_objection_first"), facts);
+      const finalText = appendSmartAdvance(applyTrainingToOutgoing(llmOut, humanTraining, "llm_objection_first"), facts, text);
       return await respond({ tenant_id, customer, facts, payload: { type: "text", text: finalText, facts } });
     } catch (err) {
       console.error("[agent] LLM objection-first error:", err);
@@ -1421,7 +1424,7 @@ async function run({ tenant_id, customer, incomingText, decision }) {
       }
 
       const fallback =
-        "Consigo te passar o valor certinho ­ƒÖé\n" +
+        "Consigo te passar o valor certinho ­ƒÖé" +
         "S├│ me diz: qual produto voc├¬ quer (ou qual modelo/kit)?";
       const out = applyTrainingToOutgoing(fallback, humanTraining, "router_preco_fallback");
       console.log("[agent] ROUTER PRECO -> OFERTA (fallback)", { tenant_id, phone, hasPitchOferta: !!pitchOferta });
@@ -1477,7 +1480,7 @@ async function run({ tenant_id, customer, incomingText, decision }) {
           facts.llm.last_used_at = null;
           facts.llm.last_reason = "playbook_objection_first";
 
-          const out = appendSmartAdvance(applyTrainingToOutgoing(chosen, humanTraining, `playbook_objection_${hit.key}`), facts);
+          const out = appendSmartAdvance(applyTrainingToOutgoing(chosen, humanTraining, `playbook_objection_${hit.key}`), facts, text);
 
           console.log("[agent] OBJECTION-FIRST -> hit", {
             tenant_id,
@@ -1555,7 +1558,7 @@ async function run({ tenant_id, customer, incomingText, decision }) {
           looksLikeObjectionNow: looksLikeObjection(text),
         });
 
-        if (first && pitchAbertura && !wasPitchSentFacts(facts, "abertura") && !looksLikeObjection(text) && !normalizeForMatch(text).includes("medo") && !normalizeForMatch(text).includes("receio") && !normalizeForMatch(text).includes("duvida") && !normalizeForMatch(text).includes("risco")) {
+        if (first && pitchAbertura && !wasPitchSentFacts(facts, "abertura") && !looksLikeObjection(text) && !normalizeForMatch(text).includes("como funciona") && !normalizeForMatch(text).includes("nao entendi") && !normalizeForMatch(text).includes("explica") && !normalizeForMatch(text).includes("duvida")) {
           markPitchSentFacts(facts, "abertura");
           const out = applyTrainingToOutgoing(pitchAbertura, humanTraining, "playbook_pitch_abertura");
           console.log("[agent] PLAYBOOK ABERTURA -> hit", { tenant_id, phone, used_product_key: facts.last_playbook_product_key });
@@ -1807,7 +1810,7 @@ if (needsCheckoutFlow) {
           const answer = applyTrainingToOutgoing(llmOut, humanTraining, "llm_checkout_hybrid");
 
           const shouldAppend = !answerAlreadyMentionsPending(answer, pendingField);
-          const finalText = shouldAppend ? `${answer}\n\n${pendingQuestion}` : answer;
+          const finalText = shouldAppend ? `${answer}${pendingQuestion}` : answer;
 
           if (shouldAppend) markPendingQuestionAppendedForInbound(facts, inboundKey);
 
@@ -1826,7 +1829,7 @@ if (needsCheckoutFlow) {
 
             const fallback = humanLLMQuotaFallback(humanTraining);
             const shouldAppend = !answerAlreadyMentionsPending(fallback, pendingField);
-            const finalText = shouldAppend ? `${fallback}\n\n${pendingQuestion2}` : fallback;
+            const finalText = shouldAppend ? `${fallback}${pendingQuestion2}` : fallback;
 
             if (shouldAppend) markPendingQuestionAppendedForInbound(facts, inboundKey2);
 
@@ -2065,7 +2068,7 @@ if (needsCheckoutFlow) {
         const answer = applyTrainingToOutgoing(llmOut, humanTraining, "llm_checkout_hybrid");
 
         const shouldAppend = !answerAlreadyMentionsPending(answer, pendingField);
-        const finalText = shouldAppend ? `${answer}\n\n${pendingQuestion}` : answer;
+        const finalText = shouldAppend ? `${answer}${pendingQuestion}` : answer;
         if (shouldAppend) markPendingQuestionAppendedForInbound(facts, inboundKey);
 
         return await respond({ tenant_id, customer, facts, payload: { type: "text", text: finalText, facts } });
@@ -2075,7 +2078,7 @@ if (needsCheckoutFlow) {
         if (err?.code === "LLM_QUOTA" || msg.includes("429") || msg.toLowerCase().includes("quota")) {
           const fallback = humanLLMQuotaFallback(humanTraining);
           const shouldAppend = !answerAlreadyMentionsPending(fallback, pendingField);
-          const finalText = shouldAppend ? `${fallback}\n\n${pendingQuestion}` : fallback;
+          const finalText = shouldAppend ? `${fallback}${pendingQuestion}` : fallback;
           if (shouldAppend) markPendingQuestionAppendedForInbound(facts, inboundKey);
 
           return await respond({ tenant_id, customer, facts, payload: { type: "text", text: finalText, facts } });
@@ -2212,7 +2215,7 @@ if (needsCheckoutFlow) {
   if (
     !blockLLMForDiagPitch &&
     !needsCheckoutFlow &&
-    (process.env.LLM_OUTSIDE_CHECKOUT_MODE === "always" || shouldUseLLMOutsideCheckout(text) || looksLikeObjection(text))
+    (process.env.LLM_OUTSIDE_CHECKOUT_MODE === "always" || shouldUseLLMOutsideCheckout(text) || looksLikeObjection(text)) && false
   ) {
     console.log("[agent] LLM OUTSIDE DEBUG", { stage: facts?.stage, needsCheckoutFlow, blockLLMForDiagPitch, shouldUseLLMOutsideCheckout: shouldUseLLMOutsideCheckout(text), looksLikeObjection: looksLikeObjection(text), text });    console.log("[agent] ENTER LLM");
     try {
@@ -2288,21 +2291,84 @@ module.exports = { run };
 
 
 
-function appendSmartAdvance(text, facts) {
+function appendSmartAdvance(text, facts, inboundText = "") {
   if (!text || typeof text !== "string") return text;
 
-  const t = text.toLowerCase();
+  const t = normalizeForMatch(inboundText || text || "");
 
-  // evita duplicar pergunta
-  if (t.includes("pix") || t.includes("cartão") || t.includes("cartao")) return text;
+  // evita duplicar CTA já presente
+  if (
+    t.includes("pix") ||
+    t.includes("cartao") ||
+    t.includes("cartão") ||
+    t.includes("boleto") ||
+    t.includes("pagamento") ||
+    t.includes("como funciona")
+  ) {
+    return text;
+  }
 
   // se estiver em checkout ativo, não interferir
   const checkout = facts?.checkout && typeof facts.checkout === "object" ? facts.checkout : null;
-  const hasActiveCheckout = !!(checkout && (checkout.awaiting_cep || checkout.awaiting_payment || checkout.awaiting_channel || checkout.awaiting_affiliate_link));
+  const hasActiveCheckout = !!(
+    checkout &&
+    (
+      checkout.awaiting_cep ||
+      checkout.awaiting_payment ||
+      checkout.awaiting_channel ||
+      checkout.awaiting_affiliate_link
+    )
+  );
   if (hasActiveCheckout) return text;
 
-  // condução suave de avanço
-  const advance = "\n\nSe fizer sentido pra você, posso te explicar rapidinho como funciona o pagamento 🙂 Você prefere pix ou cartão?";
+  let advance = "Se fizer sentido pra você, posso te explicar rapidinho como funciona 🙂";
+
+  // medo / insegurança
+  if (
+    t.includes("medo") ||
+    t.includes("receio") ||
+    t.includes("insegur") ||
+    t.includes("confi") ||
+    t.includes("desconfi") ||
+    t.includes("risco")
+  ) {
+    advance = "Se você quiser, eu também posso te explicar rapidinho como funciona de forma segura, sem complicação 🙂";
+  }
+  // preço / valor
+  else if (
+    t.includes("caro") ||
+    t.includes("preco") ||
+    t.includes("preço") ||
+    t.includes("valor") ||
+    t.includes("quanto")
+  ) {
+    advance = "Se fizer sentido pra você, eu posso te mostrar rapidinho como funciona o pagamento 🙂 Você prefere pix ou cartão?";
+  }
+  // dúvida / entendimento
+  else if (
+    t.includes("duvida") ||
+    t.includes("dúvida") ||
+    t.includes("nao entendi") ||
+    t.includes("não entendi") ||
+    t.includes("como funciona") ||
+    t.includes("explica")
+  ) {
+    advance = "Se quiser, eu posso te explicar de forma bem simples como funciona, sem enrolação 🙂";
+  }
+  // comparação
+  else if (
+    t.includes("outra") ||
+    t.includes("outro") ||
+    t.includes("concorr") ||
+    t.includes("compare") ||
+    t.includes("compar")
+  ) {
+    advance = "Se você quiser, eu posso te explicar rapidinho o que muda na prática e por que muita gente prefere essa opção 🙂";
+  }
+  // genérico
+  else {
+    advance = "Se fizer sentido pra você, posso te explicar rapidinho o próximo passo 🙂";
+  }
 
   return text + advance;
 }
@@ -2310,5 +2376,46 @@ function appendSmartAdvance(text, facts) {
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+function detectIntent(text) {
+  const t = normalizeForMatch(text || "");
+
+  if (
+    t.includes("medo") ||
+    t.includes("receio") ||
+    t.includes("duvida") ||
+    t.includes("duvida") ||
+    t.includes("nao entendi") ||
+    t.includes("como funciona") ||
+    t.includes("explica") ||
+    t.includes("caro") ||
+    t.includes("preco") ||
+    t.includes("valor")
+  ) {
+    return "objection";
+  }
+
+  if (
+    t.includes("comprar") ||
+    t.includes("quero") ||
+    t.includes("pedido")
+  ) {
+    return "checkout";
+  }
+
+  return "other";
+}
 
 
