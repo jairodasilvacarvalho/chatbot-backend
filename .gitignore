@@ -2,3 +2,20 @@
 cloudflared.exe
 tmp_*
 node_modules/
+
+# Banco de dados
+database.sqlite*
+*.sqlite
+*.sqlite-wal
+*.sqlite-shm
+
+# Storage / uploads
+storage/
+
+# Arquivos de ferramentas
+*.sqbpro
+
+# Temporários / debug
+backup-staged.patch
+debug_*.js
+check*.js
