@@ -35,7 +35,6 @@ console.log("### LOADED services/agent.js ###");
 
 const db = require("../config/db");
 const { getEffectiveTraining } = require("./humanTrainingService");
-const { generateLLMResponse } = require("../src/core/agentLLM");
 
 /* ======================
    Utils
@@ -165,10 +164,11 @@ function isPriceIntent(text) {
 function isPingLike(text) {
   const inboundNorm = normalizeText(text);
   const inboundNormMatch = normalizeForMatch(inboundNorm);
+
   return (
     !inboundNorm ||
     inboundNorm.length <= 3 ||
-    ["oi", "ola", "ol├í", "ok", "blz", "bom dia", "boa tarde", "boa noite"].includes(inboundNormMatch)
+    ["oi", "ola", "olá", "ok", "blz", "bom dia", "boa tarde", "boa noite"].includes(inboundNormMatch)
   );
 }
 /* ======================
@@ -917,7 +917,6 @@ async function classifyInboundInCheckoutLLM({ tenant_id, product_key, facts, co,
   const userText = `PENDING_FIELD: ${pendingField}TEXTO: ${text}${schemaHint}`;
 
   try {
-    const raw = await generateLLMResponse({ tenant_id, product_key, facts, stageContext, userText });
     return parseClassifierJson(raw);
   } catch (err) {
     const msg = String(err?.message || err);
@@ -1196,6 +1195,11 @@ async function inboundCountByPhone({ tenant_id, phone }) {
    Main
 ====================== */
 async function run({ tenant_id, customer, incomingText, decision }) {
+  // ⚠️ BLOCO DESATIVADO (será refeito corretamente depois)
+  if (false && process.env.LLM_OUTSIDE_CHECKOUT_MODE === "always") {
+    console.log("[agent] FORCE TOP LLM (disabled)");
+  }
+
   const text = normalizeForMatch(incomingText);
   const phone = customer?.phone || customer?.customer_phone || null;
 
@@ -1214,26 +1218,27 @@ async function run({ tenant_id, customer, incomingText, decision }) {
   facts = ensureFactsDefaults(facts, customer);
 
   // 🔥 PRIORIDADE TOTAL: OBJECTION
-  if (detectIntent(text) === "objection") {
-    console.log("[agent] INTENT: objection");
-    try {
-      const stageContext = {
-        stage: facts.stage || "abertura",
-        goal: "quebrar_objecao_com_persuasao_gerar_valor_reduzir_risco_e_conduzir_para_microcompromisso_de_compra",
-      };
-      const llmOut = await generateLLMResponse({
-        tenant_id,
-        product_key,
-        facts,
-        stageContext,
-        userText: text,
-      });
+  if (looksLikeObjection(text)) {
+  console.log("[agent] INTENT: objection");
+  try {
+    const stageContext = {
+      stage: facts.stage || "abertura",
+      goal: "quebrar_objecao_com_persuasao_gerar_valor_reduzir_risco_e_conduzir_para_microcompromisso_de_compra",
+    };
+
+    const llmOut = await generateLLMResponse({
+      tenant_id,
+      product_key,
+      facts,
+      stageContext,
+      userText: text,
+    });
       const finalText = appendSmartAdvance(
         applyTrainingToOutgoing(llmOut, {}, "llm_objection_first"),
         facts,
         text
       );
-      return await respond({
+      return respond({
         tenant_id,
         customer,
         facts,
@@ -1286,9 +1291,8 @@ async function run({ tenant_id, customer, incomingText, decision }) {
     console.log("[agent] FORCE LLM (objection first)");
     try {
       const stageContext = { stage: facts.stage || "abertura", goal: "acolher_objecao_responder_com_seguranca_e_conduzir_para_proximo_microcompromisso_de_compra" };
-      const llmOut = await generateLLMResponse({ tenant_id, product_key, facts, stageContext, userText: text });
       const finalText = appendSmartAdvance(applyTrainingToOutgoing(llmOut, humanTraining, "llm_objection_first"), facts, text);
-      return await respond({ tenant_id, customer, facts, payload: { type: "text", text: finalText, facts } });
+      return respond({ tenant_id, customer, facts, payload: { type: "text", text: finalText, facts } });
     } catch (err) {
       console.error("[agent] LLM objection-first error:", err);
     }
@@ -1302,7 +1306,7 @@ async function run({ tenant_id, customer, incomingText, decision }) {
 
     console.log("[agent] ENTER CHECKOUT (reset by buy intent)", { tenant_id, product_key, phone });
 
-    return await respond({
+    return respond({
       tenant_id,
       customer,
       facts,
@@ -1367,6 +1371,10 @@ async function run({ tenant_id, customer, incomingText, decision }) {
     console.log("[agent] POS_CHECKOUT GUARD -> HIT", { tenant_id, phone, inbound: String(text || ""), sent_at: co?.sent_at });
 
     const inboundNorm = normalizeText(text);
+  // 🧠 NOVA DECISÃO CENTRAL
+  if (decision === "llm") {
+    return respond({ tenant_id, customer, facts, payload: { type: "text", text: llmOut, facts } });
+  }
     const m = normalizeForMatch(inboundNorm);
 
     const isBuyAgain =
@@ -1379,7 +1387,7 @@ async function run({ tenant_id, customer, incomingText, decision }) {
 
       console.log("[agent] POS_CHECKOUT -> restart checkout", { tenant_id, phone });
 
-      return await respond({
+      return respond({
         tenant_id,
         customer,
         facts,
@@ -1393,7 +1401,7 @@ async function run({ tenant_id, customer, incomingText, decision }) {
       "Se tiver alguma d├║vida, me chama aqui ­ƒÖé";
 
     const out = applyTrainingToOutgoing(msg, humanTraining, "pos_checkout_nudge");
-    return await respond({ tenant_id, customer, facts, payload: { type: "text", text: out, facts } });
+    return respond({ tenant_id, customer, facts, payload: { type: "text", text: out, facts } });
   }
 
   /* ==========================================================
@@ -1401,6 +1409,10 @@ async function run({ tenant_id, customer, incomingText, decision }) {
 ========================================================== */
   if (!needsCheckoutFlow) {
     const inboundNorm = normalizeText(text);
+  // 🧠 NOVA DECISÃO CENTRAL
+  if (decision === "llm") {
+    return respond({ tenant_id, customer, facts, payload: { type: "text", text: llmOut, facts } });
+  }
     const ping = isPingLike(inboundNorm);
 
     facts.last_playbook_product_key = pbWrap?.used_product_key || product_key;
@@ -1420,7 +1432,7 @@ async function run({ tenant_id, customer, incomingText, decision }) {
         const out = applyTrainingToOutgoing(pitchOferta, humanTraining, "playbook_pitch_oferta_router_preco");
         console.log("[agent] ROUTER PRECO -> OFERTA (pitch)", { tenant_id, phone, used_product_key: facts.last_playbook_product_key });
 
-        return await respond({ tenant_id, customer, facts, payload: { type: "text", text: out, facts } });
+        return respond({ tenant_id, customer, facts, payload: { type: "text", text: out, facts } });
       }
 
       const fallback =
@@ -1429,7 +1441,7 @@ async function run({ tenant_id, customer, incomingText, decision }) {
       const out = applyTrainingToOutgoing(fallback, humanTraining, "router_preco_fallback");
       console.log("[agent] ROUTER PRECO -> OFERTA (fallback)", { tenant_id, phone, hasPitchOferta: !!pitchOferta });
 
-      return await respond({ tenant_id, customer, facts, payload: { type: "text", text: out, facts } });
+      return respond({ tenant_id, customer, facts, payload: { type: "text", text: out, facts } });
     }
 
     /* ======================
@@ -1490,7 +1502,7 @@ async function run({ tenant_id, customer, incomingText, decision }) {
             chosen_preview: out.slice(0, 80),
           });
 
-          return await respond({ tenant_id, customer, facts, payload: { type: "text", text: out, facts } });
+          return respond({ tenant_id, customer, facts, payload: { type: "text", text: out, facts } });
         }
       } catch (e) {
         console.warn("[agent] WARN OBJECTION-FIRST failed", { err: String(e?.message || e) });
@@ -1507,7 +1519,7 @@ async function run({ tenant_id, customer, incomingText, decision }) {
         facts._dirty = true;
 
         console.log("[agent] NUDGE LOOP -> ALT", { tenant_id, phone });
-        return await respond({ tenant_id, customer, facts, payload: { type: "text", text: outAlt, facts } });
+        return respond({ tenant_id, customer, facts, payload: { type: "text", text: outAlt, facts } });
       }
     }
 
@@ -1525,7 +1537,7 @@ async function run({ tenant_id, customer, incomingText, decision }) {
         const out = applyTrainingToOutgoing(nudge, humanTraining, "playbook_diag_nudge_no_repeat");
         console.log("[agent] DIAGNOSTICO (anti-repeat) -> nudge", { tenant_id, phone, inboundNorm });
 
-        return await respond({ tenant_id, customer, facts, payload: { type: "text", text: out, facts } });
+        return respond({ tenant_id, customer, facts, payload: { type: "text", text: out, facts } });
       }
 
       if (!already && pitchDiag) {
@@ -1533,7 +1545,7 @@ async function run({ tenant_id, customer, incomingText, decision }) {
         const out = applyTrainingToOutgoing(pitchDiag, humanTraining, "playbook_pitch_diagnostico");
         console.log("[agent] PLAYBOOK DIAGNOSTICO -> hit", { tenant_id, phone, used_product_key: facts.last_playbook_product_key });
 
-        return await respond({ tenant_id, customer, facts, payload: { type: "text", text: out, facts } });
+        return respond({ tenant_id, customer, facts, payload: { type: "text", text: out, facts } });
       }
     }
 
@@ -1558,12 +1570,12 @@ async function run({ tenant_id, customer, incomingText, decision }) {
           looksLikeObjectionNow: looksLikeObjection(text),
         });
 
-        if (first && pitchAbertura && !wasPitchSentFacts(facts, "abertura") && !looksLikeObjection(text) && !normalizeForMatch(text).includes("como funciona") && !normalizeForMatch(text).includes("nao entendi") && !normalizeForMatch(text).includes("explica") && !normalizeForMatch(text).includes("duvida")) {
-          markPitchSentFacts(facts, "abertura");
+        // ABERTURA DESABILITADA TEMPORARIAMENTE PARA TESTE DE IA
+        if (false) {
           const out = applyTrainingToOutgoing(pitchAbertura, humanTraining, "playbook_pitch_abertura");
-          console.log("[agent] PLAYBOOK ABERTURA -> hit", { tenant_id, phone, used_product_key: facts.last_playbook_product_key });
+        // BLOCO ABERTURA IGNORADO
 
-          return await respond({ tenant_id, customer, facts, payload: { type: "text", text: out, facts } });
+          return respond({ tenant_id, customer, facts, payload: { type: "text", text: out, facts } });
         }
       }
     } catch (e) {
@@ -1583,7 +1595,7 @@ async function run({ tenant_id, customer, incomingText, decision }) {
           const out = applyTrainingToOutgoing(pitch, humanTraining, "playbook_pitch_oferta");
           console.log("[agent] PLAYBOOK OFERTA -> hit", { tenant_id, phone, used_product_key: facts.last_playbook_product_key });
 
-          return await respond({ tenant_id, customer, facts, payload: { type: "text", text: out, facts } });
+          return respond({ tenant_id, customer, facts, payload: { type: "text", text: out, facts } });
         }
       }
 
@@ -1594,7 +1606,7 @@ async function run({ tenant_id, customer, incomingText, decision }) {
           const out = applyTrainingToOutgoing(pitch, humanTraining, "playbook_pitch_fechamento");
           console.log("[agent] PLAYBOOK FECHAMENTO -> hit", { tenant_id, phone, used_product_key: facts.last_playbook_product_key });
 
-          return await respond({ tenant_id, customer, facts, payload: { type: "text", text: out, facts } });
+          return respond({ tenant_id, customer, facts, payload: { type: "text", text: out, facts } });
         }
       }
     }
@@ -1630,7 +1642,7 @@ async function run({ tenant_id, customer, incomingText, decision }) {
             applied.facts._dirty = true;
 
             console.log("[agent] PLAYBOOK NUDGE LOOP -> ALT", { tenant_id, phone });
-            return await respond({
+            return respond({
               tenant_id,
               customer,
               facts: applied.facts,
@@ -1646,7 +1658,7 @@ async function run({ tenant_id, customer, incomingText, decision }) {
         applied.facts.llm.last_reason = "playbook";
         applied.facts._dirty = true;
 
-        return await respond({
+        return respond({
           tenant_id,
           customer,
           facts: applied.facts,
@@ -1681,7 +1693,7 @@ if (needsCheckoutFlow) {
         facts.stage = "checkout_payment";
         facts._dirty = true;
 
-        return await respond({
+        return respond({
           tenant_id,
           customer,
           facts,
@@ -1698,7 +1710,7 @@ if (needsCheckoutFlow) {
         facts.stage = "checkout_channel";
         facts._dirty = true;
 
-        return await respond({
+        return respond({
           tenant_id,
           customer,
           facts,
@@ -1719,7 +1731,7 @@ if (needsCheckoutFlow) {
           facts._dirty = true;
           await finishCheckout({ tenant_id, customer, facts, co });
 
-          return await respond({
+          return respond({
             tenant_id,
             customer,
             facts,
@@ -1731,7 +1743,7 @@ if (needsCheckoutFlow) {
         enforceSingleAwaiting(co);
         facts._dirty = true;
 
-        return await respond({
+        return respond({
           tenant_id,
           customer,
           facts,
@@ -1747,7 +1759,7 @@ if (needsCheckoutFlow) {
 
         await finishCheckout({ tenant_id, customer, facts, co });
 
-        return await respond({
+        return respond({
           tenant_id,
           customer,
           facts,
@@ -1782,22 +1794,22 @@ if (needsCheckoutFlow) {
         console.log("[agent] ENTER LLM (checkout_hybrid)", { tenant_id, product_key, inboundKey, pendingField });
 
         try {
-          const stageContext = {
-            stage: facts.stage || "checkout",
-            goal: "responder_objecao_sem_quebrar_checkout_e_retornar_para_pergunta_pendente",
-            mode: "checkout_hybrid",
-            pending_field: pendingField,
-            pending_question: removeKnownEmojis(String(pendingQuestion || "")),
-            hard_rule: "NAO repita a pergunta pendente; eu vou anexar se precisar.",
-          };
+ const stageContext = {
+  stage: facts.stage || "checkout",
+  goal: "responder_objecao_sem_quebrar_checkout_e_retornar_para_pergunta_pendente",
+  mode: "checkout_hybrid",
+  pending_field: pendingField,
+  pending_question: removeKnownEmojis(String(pendingQuestion || "")),
+  hard_rule: "NAO repita a pergunta pendente; eu vou anexar se precisar.",
+};
 
-          const llmOut = await generateLLMResponse({
-            tenant_id,
-            product_key,
-            facts,
-            stageContext,
-            userText: text,
-          });
+const llmOut = await generateLLMResponse({
+  tenant_id,
+  product_key,
+  facts,
+  stageContext,
+  userText: text,
+});
 
           // marca anti-loop do h├¡brido
           markLLMUsedForInbound(facts, inboundKey);
@@ -1814,7 +1826,7 @@ if (needsCheckoutFlow) {
 
           if (shouldAppend) markPendingQuestionAppendedForInbound(facts, inboundKey);
 
-          return await respond({
+          return respond({
             tenant_id,
             customer,
             facts,
@@ -1833,7 +1845,7 @@ if (needsCheckoutFlow) {
 
             if (shouldAppend) markPendingQuestionAppendedForInbound(facts, inboundKey2);
 
-            return await respond({
+            return respond({
               tenant_id,
               customer,
               facts,
@@ -1859,16 +1871,16 @@ if (needsCheckoutFlow) {
       });
 
       if (pendingField === "cep")
-        return await respond({ tenant_id, customer, facts, payload: { type: "text", text: humanInvalidCep(humanTraining), facts } });
+        return respond({ tenant_id, customer, facts, payload: { type: "text", text: humanInvalidCep(humanTraining), facts } });
 
       if (pendingField === "payment")
-        return await respond({ tenant_id, customer, facts, payload: { type: "text", text: humanInvalidPayment(humanTraining), facts } });
+        return respond({ tenant_id, customer, facts, payload: { type: "text", text: humanInvalidPayment(humanTraining), facts } });
 
       if (pendingField === "channel")
-        return await respond({ tenant_id, customer, facts, payload: { type: "text", text: humanAskChannel(humanTraining), facts } });
+        return respond({ tenant_id, customer, facts, payload: { type: "text", text: humanAskChannel(humanTraining), facts } });
 
       if (pendingField === "affiliate_link")
-        return await respond({
+        return respond({
           tenant_id,
           customer,
           facts,
@@ -1877,7 +1889,7 @@ if (needsCheckoutFlow) {
     }
 
     if (v.ok && !v.normalized) {
-      return await respond({
+      return respond({
         tenant_id,
         customer,
         facts,
@@ -1922,7 +1934,7 @@ if (needsCheckoutFlow) {
         if (pendingField === "cep") {
           const cep = normalizeCep(cls.value) || normalizeCep(norm);
           if (!cep) {
-            return await respond({ tenant_id, customer, facts, payload: { type: "text", text: humanInvalidCep(humanTraining), facts } });
+            return respond({ tenant_id, customer, facts, payload: { type: "text", text: humanInvalidCep(humanTraining), facts } });
           }
           co.cep = cep;
           co.awaiting_cep = false;
@@ -1932,13 +1944,13 @@ if (needsCheckoutFlow) {
           facts.stage = "checkout_payment";
           facts._dirty = true;
 
-          return await respond({ tenant_id, customer, facts, payload: { type: "text", text: humanAskPayment(humanTraining), facts } });
+          return respond({ tenant_id, customer, facts, payload: { type: "text", text: humanAskPayment(humanTraining), facts } });
         }
 
         if (pendingField === "payment") {
           const pay = normalizePayment(cls.value) || normalizePayment(norm);
           if (!pay) {
-            return await respond({
+            return respond({
               tenant_id,
               customer,
               facts,
@@ -1953,13 +1965,13 @@ if (needsCheckoutFlow) {
           facts.stage = "checkout_channel";
           facts._dirty = true;
 
-          return await respond({ tenant_id, customer, facts, payload: { type: "text", text: humanAskChannel(humanTraining), facts } });
+          return respond({ tenant_id, customer, facts, payload: { type: "text", text: humanAskChannel(humanTraining), facts } });
         }
 
         if (pendingField === "channel") {
           const ch = normalizeChannel(cls.value) || normalizeChannel(norm);
           if (!ch) {
-            return await respond({ tenant_id, customer, facts, payload: { type: "text", text: humanAskChannel(humanTraining), facts } });
+            return respond({ tenant_id, customer, facts, payload: { type: "text", text: humanAskChannel(humanTraining), facts } });
           }
 
           co.channel = ch;
@@ -1973,7 +1985,7 @@ if (needsCheckoutFlow) {
             facts._dirty = true;
             await finishCheckout({ tenant_id, customer, facts, co });
 
-            return await respond({
+            return respond({
               tenant_id,
               customer,
               facts,
@@ -1985,7 +1997,7 @@ if (needsCheckoutFlow) {
           enforceSingleAwaiting(co);
           facts._dirty = true;
 
-          return await respond({
+          return respond({
             tenant_id,
             customer,
             facts,
@@ -1996,7 +2008,7 @@ if (needsCheckoutFlow) {
         if (pendingField === "affiliate_link") {
           const link = looksLikeUrl(cls.value) ? cls.value : looksLikeUrl(norm) ? norm : null;
           if (!link) {
-            return await respond({
+            return respond({
               tenant_id,
               customer,
               facts,
@@ -2011,7 +2023,7 @@ if (needsCheckoutFlow) {
 
           await finishCheckout({ tenant_id, customer, facts, co });
 
-          return await respond({
+          return respond({
             tenant_id,
             customer,
             facts,
@@ -2057,7 +2069,6 @@ if (needsCheckoutFlow) {
           hard_rule: "NAO repita a pergunta pendente; eu vou anexar se precisar.",
         };
 
-        const llmOut = await generateLLMResponse({ tenant_id, product_key, facts, stageContext, userText: text });
         markLLMUsedForInbound(facts, inboundKey);
 
         facts.llm = facts.llm && typeof facts.llm === "object" ? facts.llm : {};
@@ -2071,7 +2082,7 @@ if (needsCheckoutFlow) {
         const finalText = shouldAppend ? `${answer}${pendingQuestion}` : answer;
         if (shouldAppend) markPendingQuestionAppendedForInbound(facts, inboundKey);
 
-        return await respond({ tenant_id, customer, facts, payload: { type: "text", text: finalText, facts } });
+        return respond({ tenant_id, customer, facts, payload: { type: "text", text: finalText, facts } });
       } catch (err) {
         const msg = String(err?.message || err);
 
@@ -2081,7 +2092,7 @@ if (needsCheckoutFlow) {
           const finalText = shouldAppend ? `${fallback}${pendingQuestion}` : fallback;
           if (shouldAppend) markPendingQuestionAppendedForInbound(facts, inboundKey);
 
-          return await respond({ tenant_id, customer, facts, payload: { type: "text", text: finalText, facts } });
+          return respond({ tenant_id, customer, facts, payload: { type: "text", text: finalText, facts } });
         }
 
         console.error("ÔØî [agent] LLM checkout_hybrid error:", msg);
@@ -2096,7 +2107,7 @@ if (needsCheckoutFlow) {
     console.log("[agent] ENTER CHECKOUT (awaiting_cep)");
     const cep = normalizeCep(text);
     if (!cep) {
-      return await respond({ tenant_id, customer, facts, payload: { type: "text", text: humanInvalidCep(humanTraining), facts } });
+      return respond({ tenant_id, customer, facts, payload: { type: "text", text: humanInvalidCep(humanTraining), facts } });
     }
 
     co.cep = cep;
@@ -2106,7 +2117,7 @@ if (needsCheckoutFlow) {
 
     facts.stage = "checkout_payment";
     facts._dirty = true;
-    return await respond({ tenant_id, customer, facts, payload: { type: "text", text: humanAskPayment(humanTraining), facts } });
+    return respond({ tenant_id, customer, facts, payload: { type: "text", text: humanAskPayment(humanTraining), facts } });
   }
 
   /* ======================
@@ -2116,7 +2127,7 @@ if (needsCheckoutFlow) {
     console.log("[agent] ENTER CHECKOUT (awaiting_payment)");
     const pay = normalizePayment(text);
     if (!pay) {
-      return await respond({ tenant_id, customer, facts, payload: { type: "text", text: humanInvalidPayment(humanTraining), facts } });
+      return respond({ tenant_id, customer, facts, payload: { type: "text", text: humanInvalidPayment(humanTraining), facts } });
     }
 
     co.payment = pay;
@@ -2126,7 +2137,7 @@ if (needsCheckoutFlow) {
 
     facts.stage = "checkout_channel";
     facts._dirty = true;
-    return await respond({ tenant_id, customer, facts, payload: { type: "text", text: humanAskChannel(humanTraining), facts } });
+    return respond({ tenant_id, customer, facts, payload: { type: "text", text: humanAskChannel(humanTraining), facts } });
   }
 
   /* ======================
@@ -2136,7 +2147,7 @@ if (needsCheckoutFlow) {
     console.log("[agent] ENTER CHECKOUT (awaiting_channel)");
     const ch = normalizeChannel(text);
     if (!ch) {
-      return await respond({ tenant_id, customer, facts, payload: { type: "text", text: humanAskChannel(humanTraining), facts } });
+      return respond({ tenant_id, customer, facts, payload: { type: "text", text: humanAskChannel(humanTraining), facts } });
     }
 
     co.channel = ch;
@@ -2149,14 +2160,14 @@ if (needsCheckoutFlow) {
       co.checkout_url = directUrl;
       facts._dirty = true;
       await finishCheckout({ tenant_id, customer, facts, co });
-      return await respond({ tenant_id, customer, facts, payload: { type: "text", text: humanSendFinalLink(directUrl, humanTraining), facts } });
+      return respond({ tenant_id, customer, facts, payload: { type: "text", text: humanSendFinalLink(directUrl, humanTraining), facts } });
     }
 
     co.awaiting_affiliate_link = true;
     enforceSingleAwaiting(co);
     facts._dirty = true;
 
-    return await respond({ tenant_id, customer, facts, payload: { type: "text", text: humanAskAffiliateLink(ch, humanTraining), facts } });
+    return respond({ tenant_id, customer, facts, payload: { type: "text", text: humanAskAffiliateLink(ch, humanTraining), facts } });
   }
 
   /* ======================
@@ -2165,7 +2176,7 @@ if (needsCheckoutFlow) {
   if (co.awaiting_affiliate_link) {
     console.log("[agent] ENTER CHECKOUT (awaiting_affiliate_link)");
     if (!looksLikeUrl(text)) {
-      return await respond({ tenant_id, customer, facts, payload: { type: "text", text: humanInvalidAffiliateLink(humanTraining), facts } });
+      return respond({ tenant_id, customer, facts, payload: { type: "text", text: humanInvalidAffiliateLink(humanTraining), facts } });
     }
 
     co.affiliate_url = text;
@@ -2174,7 +2185,7 @@ if (needsCheckoutFlow) {
     facts._dirty = true;
 
     await finishCheckout({ tenant_id, customer, facts, co });
-    return await respond({ tenant_id, customer, facts, payload: { type: "text", text: humanSendFinalLink(co.checkout_url, humanTraining), facts } });
+    return respond({ tenant_id, customer, facts, payload: { type: "text", text: humanSendFinalLink(co.checkout_url, humanTraining), facts } });
   }
 
   // 5) CEP ÔÇ£soltoÔÇØ inicia checkout inteligente
@@ -2190,7 +2201,7 @@ if (needsCheckoutFlow) {
       facts._dirty = true;
       console.log("[agent] ENTER CHECKOUT (smart cep start)", { cep: maybeCep });
 
-      return await respond({ tenant_id, customer, facts, payload: { type: "text", text: humanAskPayment(humanTraining), facts } });
+      return respond({ tenant_id, customer, facts, payload: { type: "text", text: humanAskPayment(humanTraining), facts } });
     }
   }
 
@@ -2202,7 +2213,7 @@ if (needsCheckoutFlow) {
     if (bypass) {
       console.log("[agent] INTEL BYPASS HIT");
       const finalText = applyTrainingToOutgoing(bypass, humanTraining, "intel_bypass");
-      return await respond({ tenant_id, customer, facts, payload: { type: "text", text: finalText, facts } });
+      return respond({ tenant_id, customer, facts, payload: { type: "text", text: finalText, facts } });
     }
   }
 
@@ -2213,15 +2224,14 @@ if (needsCheckoutFlow) {
      6) LLM fora do checkout
   ====================== */
   if (
-    !blockLLMForDiagPitch &&
+    true &&
     !needsCheckoutFlow &&
-    (process.env.LLM_OUTSIDE_CHECKOUT_MODE === "always" || shouldUseLLMOutsideCheckout(text) || looksLikeObjection(text)) && false
+    (process.env.LLM_OUTSIDE_CHECKOUT_MODE === "always" || shouldUseLLMOutsideCheckout(text) || looksLikeObjection(text))
   ) {
     console.log("[agent] LLM OUTSIDE DEBUG", { stage: facts?.stage, needsCheckoutFlow, blockLLMForDiagPitch, shouldUseLLMOutsideCheckout: shouldUseLLMOutsideCheckout(text), looksLikeObjection: looksLikeObjection(text), text });    console.log("[agent] ENTER LLM");
     try {
       const stageContext = { stage: facts.stage || "abertura", goal: "responder_duvida_ou_objecao_com_clareza_e_levar_o_cliente_para_um_proximo_passo_de_compra_sem_pressionar" };
 
-      const llmOut = await generateLLMResponse({ tenant_id, product_key, facts, stageContext, userText: text });
 
       facts.llm = facts.llm && typeof facts.llm === "object" ? facts.llm : {};
       facts.llm.last_used_at = new Date().toISOString();
@@ -2229,12 +2239,12 @@ if (needsCheckoutFlow) {
       facts._dirty = true;
 
       const finalText = applyTrainingToOutgoing(llmOut, humanTraining, "llm");
-      return await respond({ tenant_id, customer, facts, payload: { type: "text", text: finalText, facts } });
+      return respond({ tenant_id, customer, facts, payload: { type: "text", text: finalText, facts } });
     } catch (err) {
       const msg = String(err?.message || err);
 
       if (err?.code === "LLM_QUOTA" || msg.includes("429") || msg.toLowerCase().includes("quota")) {
-        return await respond({ tenant_id, customer, facts, payload: { type: "text", text: humanLLMQuotaFallback(humanTraining), facts } });
+        return respond({ tenant_id, customer, facts, payload: { type: "text", text: humanLLMQuotaFallback(humanTraining), facts } });
       }
 
       console.error("ÔØî [agent] LLM error:", msg);
@@ -2258,14 +2268,14 @@ if (needsCheckoutFlow) {
     fallbackBase = "Antes de te passar o melhor caminho, me diz: voc├¬ quer comprar agora ou s├│ tirar uma d├║vida? ­ƒÖé";
   }
 
-  if (!needsCheckoutFlow && isPingLike(text) && fallbackBase.includes("Me diz rapidinho")) {
+  if (process.env.LLM_OUTSIDE_CHECKOUT_MODE !== "always" && !needsCheckoutFlow && isPingLike(text) && fallbackBase.includes("Me diz rapidinho")) {
     if (!wasPitchSentFacts(facts, "abertura_nudge")) {
       markPitchSentFacts(facts, "abertura_nudge");
     }
   }
 
   const fallback = applyTrainingToOutgoing(fallbackBase, humanTraining, "fallback");
-  return await respond({ tenant_id, customer, facts, payload: { type: "text", text: fallback, facts } });
+  return respond({ tenant_id, customer, facts, payload: { type: "text", text: fallback, facts } });
 }
 
 module.exports = { run };
@@ -2355,47 +2365,33 @@ function appendSmartAdvance(text, facts, inboundText = "") {
   ) {
     advance = "Se quiser, eu posso te explicar de forma bem simples como funciona, sem enrolação 🙂";
   }
-  // comparação
-  else if (
-    t.includes("outra") ||
-    t.includes("outro") ||
-    t.includes("concorr") ||
-    t.includes("compare") ||
-    t.includes("compar")
-  ) {
-    advance = "Se você quiser, eu posso te explicar rapidinho o que muda na prática e por que muita gente prefere essa opção 🙂";
-  }
-  // genérico
-  else {
-    advance = "Se fizer sentido pra você, posso te explicar rapidinho o próximo passo 🙂";
-  }
-
-  return text + advance;
+// comparação
+else if (
+  t.includes("outra") ||
+  t.includes("outro") ||
+  t.includes("concorr") ||
+  t.includes("compare") ||
+  t.includes("compar")
+) {
+  advance = "Se você quiser, eu posso te explicar rapidinho o que muda na prática e por que muita gente prefere essa opção 🙂";
+}
+// genérico
+else {
+  advance = "Se fizer sentido pra você, posso te explicar rapidinho o próximo passo 🙂";
 }
 
+return text + advance;
+}
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+// ==============================
+// Detecta intenção simples
+// ==============================
 function detectIntent(text) {
   const t = normalizeForMatch(text || "");
 
   if (
     t.includes("medo") ||
     t.includes("receio") ||
-    t.includes("duvida") ||
     t.includes("duvida") ||
     t.includes("nao entendi") ||
     t.includes("como funciona") ||
@@ -2418,10 +2414,31 @@ function detectIntent(text) {
   return "other";
 }
 
+// ==============================
+// 🧠 DECISÃO CENTRAL (IA vs Playbook)
+// ==============================
+function decideResponseMode({ text, needsCheckoutFlow }) {
+  const t = normalizeForMatch(text || "");
 
+  // 🔥 prioridade 1: objeção → IA
+  if (looksLikeObjection(t)) return "llm";
 
+  // 🔥 prioridade 2: dúvida real → IA
+  if (
+    t.includes("explica") ||
+    t.includes("como funciona") ||
+    t.includes("duvida") ||
+    t.includes("não entendi") ||
+    t.includes("nao entendi")
+  ) {
+    return "llm";
+  }
 
+  // 🔥 prioridade 3: fora do checkout → IA
+  if (!needsCheckoutFlow && process.env.LLM_OUTSIDE_CHECKOUT_MODE === "always") {
+    return "llm";
+  }
 
-
-
-
+  // 🔒 fallback → playbook
+  return "playbook";
+}
