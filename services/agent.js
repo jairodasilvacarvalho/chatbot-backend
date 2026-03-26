@@ -1219,11 +1219,11 @@ async function run({ tenant_id, customer, incomingText, decision }) {
     try {
       const stageContext = {
         stage: facts.stage || "abertura",
-        goal: "responder_duvida_ou_objecao_com_clareza_e_conduzir_para_proximo_passo",
+        goal: "quebrar_objecao_com_persuasao_gerar_valor_reduzir_risco_e_conduzir_para_microcompromisso_de_compra",
       };
       const llmOut = await generateLLMResponse({
         tenant_id,
-        product_key: "DEFAULT",
+        product_key,
         facts,
         stageContext,
         userText: text,
@@ -1435,7 +1435,7 @@ async function run({ tenant_id, customer, incomingText, decision }) {
     /* ======================
        (2) Objection-first (GANHA da abertura/diagn├│stico/nudge)
     ====================== */
-    if (pb?.objections_json) {
+    if (false && pb?.objections_json) {
       try {
         const stageNow = String(facts?.stage || "").trim() || "abertura";
 
@@ -1446,7 +1446,7 @@ async function run({ tenant_id, customer, incomingText, decision }) {
               ? pb.objections_json
               : {};
 
-        console.log("[agent] MARKER OBJECTION-FIRST reached", {
+        console.log("[agent] MARKER OBJECTION-FIRST reached [LEGACY DISABLED]", {
           tenant_id,
           phone,
           inboundNorm,
@@ -1482,7 +1482,7 @@ async function run({ tenant_id, customer, incomingText, decision }) {
 
           const out = appendSmartAdvance(applyTrainingToOutgoing(chosen, humanTraining, `playbook_objection_${hit.key}`), facts, text);
 
-          console.log("[agent] OBJECTION-FIRST -> hit", {
+          console.log("[agent] OBJECTION-FIRST -> hit [LEGACY DISABLED]", {
             tenant_id,
             phone,
             key: hit.key,
@@ -2417,5 +2417,11 @@ function detectIntent(text) {
 
   return "other";
 }
+
+
+
+
+
+
 
 
