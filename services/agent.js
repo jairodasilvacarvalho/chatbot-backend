@@ -1324,7 +1324,7 @@ async function run({ tenant_id, customer, incomingText, decision }) {
   if (co.awaiting_payment && co.payment) co.awaiting_payment = false;
   if (co.awaiting_cep && co.cep) co.awaiting_cep = false;
 
-  // se sent => mata awaitings e garante pos_checkout (mas N├âO bloqueia LLM fora do checkout)
+   // se sent => mata awaitings e garante pos_checkout (mas NÃO bloqueia LLM fora do checkout)
   if (co.sent) {
     co.awaiting_cep = false;
     co.awaiting_payment = false;
@@ -1364,17 +1364,23 @@ async function run({ tenant_id, customer, incomingText, decision }) {
     normalizedForMatch: normalizeForMatch(text),
   });
 
+  // 🧠 DECISÃO CENTRAL IA-FIRST
+  const decisionMode = decideResponseMode({
+    text,
+    needsCheckoutFlow,
+  });
+
+  console.log("[agent] IA-FIRST DECISION:", {
+    decisionMode,
+  });
+
   /* ==========================================================
-     Ô£à ATALHO POS-CHECKOUT (DENTRO do run)
+     ⚠️ ATALHO POS-CHECKOUT (DENTRO do run)
   ========================================================== */
   if (!needsCheckoutFlow && facts?.stage === "pos_checkout" && co?.sent === true) {
     console.log("[agent] POS_CHECKOUT GUARD -> HIT", { tenant_id, phone, inbound: String(text || ""), sent_at: co?.sent_at });
 
     const inboundNorm = normalizeText(text);
-  // 🧠 NOVA DECISÃO CENTRAL
-  if (decision === "llm") {
-    return respond({ tenant_id, customer, facts, payload: { type: "text", text: llmOut, facts } });
-  }
     const m = normalizeForMatch(inboundNorm);
 
     const isBuyAgain =
@@ -1396,14 +1402,13 @@ async function run({ tenant_id, customer, incomingText, decision }) {
     }
 
     const msg =
-      "Fechou Ô£à Seu link j├í foi enviado. " +
+      "Fechou 💥 Seu link já foi enviado. " +
       "Se quiser *comprar de novo*, diga **quero comprar**. " +
-      "Se tiver alguma d├║vida, me chama aqui ­ƒÖé";
+      "Se tiver alguma dúvida, me chama aqui 😊";
 
     const out = applyTrainingToOutgoing(msg, humanTraining, "pos_checkout_nudge");
     return respond({ tenant_id, customer, facts, payload: { type: "text", text: out, facts } });
   }
-
   /* ==========================================================
      Ô£à BLOCO PR├ë-LLM (fora do checkout)
 ========================================================== */
@@ -2442,3 +2447,4 @@ function decideResponseMode({ text, needsCheckoutFlow }) {
   // 🔒 fallback → playbook
   return "playbook";
 }
+
